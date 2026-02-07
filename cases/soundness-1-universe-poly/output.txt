@@ -1,0 +1,2 @@
+test.lean:21:4: error: code generator does not support recursor `MyFalse.rec` yet, consider using 'match ... with' and/or structural recursion
+falseElim.{u} {α : Type u} : MyFalse → α

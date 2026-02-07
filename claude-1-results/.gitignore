@@ -1,0 +1,24 @@
+# Compiled artifacts
+*.so
+*.dylib
+*.dll
+*.o
+*.a
+
+# Build artifacts
+build/
+.lake/
+lake-packages/
+lake-manifest.json
+
+# Lean artifacts
+*.olean
+*.ilean
+*.trace
+
+# Temporary files
+/tmp/
+*.tmp
+
+# OS files
+.DS_Store

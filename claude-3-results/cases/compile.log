@@ -1,0 +1,10 @@
+runtime-exploit-real.c:62:13: warning: unused variable 'original_rc' [-Wunused-variable]
+   62 |         int original_rc = raw->m_rc;
+      |             ^~~~~~~~~~~
+runtime-exploit-real.c:448:18: warning: unused variable 'test_scalar' [-Wunused-variable]
+  448 |     lean_object* test_scalar = lean_box(42);
+      |                  ^~~~~~~~~~~
+runtime-exploit-real.c:39:13: warning: unused function 'evil_finalizer' [-Wunused-function]
+   39 | static void evil_finalizer(void* data) {
+      |             ^~~~~~~~~~~~~~
+3 warnings generated.

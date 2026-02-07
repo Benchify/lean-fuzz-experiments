@@ -1,0 +1,3 @@
+getDefault : Nat
+getDefault : Bool
+42 : Int

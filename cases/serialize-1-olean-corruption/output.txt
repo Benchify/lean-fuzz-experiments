@@ -1,0 +1,29 @@
+=== .olean Corruption Test ===
+
+
+Test: flip_bits corruption
+----------------------------------------
+Return code: 1
+⚠️  WARNING: No error reported for corrupted file!
+
+Test: truncate corruption
+----------------------------------------
+Return code: 1
+⚠️  WARNING: No error reported for corrupted file!
+
+Test: zeros corruption
+----------------------------------------
+Return code: 1
+⚠️  WARNING: No error reported for corrupted file!
+
+Test: ff corruption
+----------------------------------------
+Return code: 1
+⚠️  WARNING: No error reported for corrupted file!
+
+Test: header corruption
+----------------------------------------
+Return code: 1
+⚠️  WARNING: No error reported for corrupted file!
+
+=== Test Complete ===

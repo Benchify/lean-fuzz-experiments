@@ -1,0 +1,9 @@
+test.lean:17:6: warning: unused variable `env`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+Environment manipulation test
+test.lean:34:26: error(lean.invalidField): Invalid field `toConst`: The environment does not contain `Lean.ConstantInfo.toConst`, so it is not possible to project the field `toConst` from an expression
+  info
+of type `ConstantInfo`
+test.lean:36:0: error: elaboration function for `commandInspect_env` has not been implemented
+True : Prop

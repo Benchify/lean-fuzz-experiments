@@ -1,0 +1,58 @@
+╔══════════════════════════════════════════════════════════════╗
+║  Lean 4.27.0 C Runtime Exploitation Test Suite             ║
+║  Based on Real Runtime Implementation Analysis              ║
+╚══════════════════════════════════════════════════════════════╝
+
+WARNING: This test attempts to exploit Lean's C runtime.
+Expected behavior: All attacks should FAIL or be MITIGATED.
+If any attack succeeds: CRITICAL SECURITY VULNERABILITY!
+
+═══════════════════════════════════════════════════════════════
+Creating test objects...
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+EXECUTING EXPLOITATION ATTACKS
+═══════════════════════════════════════════════════════════════
+[ATTACK 1] Attempting reference count manipulation...
+  Original RC: 1
+  Original Tag: 0
+  Corrupted RC to 1
+  Object should be freed now!
+  Attempting to access freed object...
+  Tag after free: 0 (should be corrupted or crash)
+
+[ATTACK 2] Attempting type confusion via tag corruption...
+  Original tag: 0
+  Corrupted tag to 246 (Array)
+  Type check says it's an array!
+  Array size: 3 (likely garbage)
+  Attempting to read array element 0...
+  Element: 0x0
+
+[ATTACK 3] Attempting array buffer overflow...
+  Array size: 3
+  Array capacity: 3
+  Array data pointer: 0x596960100a8
+  Attempting to write at index 13 (past capacity)...
+  Write succeeded! Memory corruption achieved.
+  Read back: 0x1bd5b7ddf
+
+[ATTACK 4] Attempting scalar/pointer confusion...
+  Is scalar: no
+  Unboxed value: 0x2cb4b010030
+  As pointer: 0x59696020060
+  [SUCCESS] Leaked object address: 0x2cb4b010030
+  This reveals memory layout!
+  Object header at: 0x59696020060
+  RC offset: 0
+  Tag value: 0
+
+[ATTACK 5] Attempting constructor field overflow...
+  Constructor has 0 fields
+  Attempting to read field 5 (past bounds)...
+LEAN ASSERTION VIOLATION
+File: /Users/maxvonhippel/.elan/toolchains/leanprover--lean4---v4.27.0/include/lean/lean.h
+Line: 618
+i < lean_ctor_num_objs(o)
+(C)ontinue, (A)bort/exit, (S)top/trap

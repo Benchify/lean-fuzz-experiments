@@ -1,0 +1,16 @@
+=== Parser Fuzzing - Malformed Inputs ===
+Test 1: Deep nesting (stack overflow attempt)
+
+Stack overflow detected. Aborting.
+
+Test 2: Extreme identifier length
+
+Test 3: Unicode edge cases
+unicode_test.lean:2:6: error: expected token
+
+Test 4: Null bytes
+null_bytes.lean:1:12: error: expected token
+
+Test 5: Malformed numbers
+
+=== Fuzzing complete ===

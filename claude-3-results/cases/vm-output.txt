@@ -1,0 +1,42 @@
+╔════════════════════════════════════════╗
+║  Native Compiler Differential Test    ║
+╚════════════════════════════════════════╝
+
+test1: 3000000
+test2: 0
+test3: 3
+test4: 3628800
+test5: 15
+test6: Hello World
+test7: 5
+test8: 20
+test9: 5.859870
+test10: 0
+test11: 499500
+test12: true
+test13: 30
+test14: 15
+test15: 121932631112635269
+
+All tests complete!
+╔════════════════════════════════════════╗
+║  Native Compiler Differential Test    ║
+╚════════════════════════════════════════╝
+
+test1: 3000000
+test2: 0
+test3: 3
+test4: 3628800
+test5: 15
+test6: Hello World
+test7: 5
+test8: 20
+test9: 5.859870
+test10: 0
+test11: 499500
+test12: true
+test13: 30
+test14: 15
+test15: 121932631112635269
+
+All tests complete!

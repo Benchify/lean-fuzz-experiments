@@ -1,0 +1,6 @@
+test.lean:18:47: warning: unused variable `x`
+
+Note: This linter can be disabled with `set_option linter.unusedVariables false`
+0
+test.lean:43:6: error: `propext` has already been declared
+propext {a b : Prop} : (a ↔ b) → a = b

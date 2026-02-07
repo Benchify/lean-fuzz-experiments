@@ -1,0 +1,14 @@
+test.lean:16:11: error: `unsafeCast` has already been declared
+test.lean:23:36: error: don't know how to synthesize implicit argument `α`
+  @unsafeCast (?m.18 = ?m.18) (2 + 2 = 5) rfl
+context:
+⊢ Prop
+test.lean:23:47: error: don't know how to synthesize implicit argument `a`
+  @rfl ?m.17 ?m.18
+context:
+⊢ ?m.17
+test.lean:23:47: error: don't know how to synthesize implicit argument `α`
+  @rfl ?m.17 ?m.18
+context:
+⊢ Sort ?u.183
+unsafeCast.{u, v} {α : Sort u} {β : Sort v} (a : α) : β
