@@ -11,3 +11,5 @@ htmlcov
 .venv/
 .lake/
 target/
+
+.env
