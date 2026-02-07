@@ -13,7 +13,26 @@ We utilize a three-tier architecture to bridge the gap between high-performance 
 3. The Template (Lean 4): The "sandbox." A pre-configured Lean project that provides the necessary context and imports for the fuzzer. It serves as the baseline environment to ensure every test case is evaluated under standard library conditions.
 
 ## Building Lean Projects
-Use [`comparator`](https://github.com/leanprover/comparator), not _just_ vanilla `lake build` for checking Lean projects. `comparator` provides differential testing capabilities that are essential for our fuzzing workflow. We should maybe also use [`safeverify`](https://github.com/gasstationmanager/safeverify) as well. 
+Use [`comparator`](https://github.com/leanprover/comparator), not _just_ vanilla `lake build` for checking Lean projects. `comparator` provides differential testing capabilities that are essential for our fuzzing workflow. We should maybe also use [`safeverify`](https://github.com/gasstationmanager/safeverify) as well.
+
+## External Tool Setup
+The pipeline depends on two external Lean tools that must be cloned and built separately. Their binary paths are configured via `.env`.
+
+1. Clone and build [`lean4export`](https://github.com/leanprover/lean4export):
+   ```sh
+   git clone https://github.com/leanprover/lean4export.git
+   cd lean4export && lake build
+   ```
+2. Clone and build [`comparator`](https://github.com/leanprover/comparator):
+   ```sh
+   git clone https://github.com/leanprover/comparator.git
+   cd comparator && lake build
+   ```
+3. Set the `_PATH` variables in `.env` to point to the built binaries:
+   ```
+   LEAN4EXPORT_PATH=<path-to>/lean4export/.lake/build/bin/lean4export
+   COMPARATOR_PATH=<path-to>/comparator/.lake/build/bin/comparator
+   ```
 
 
 ## Success Criteria: The "False" Proof
