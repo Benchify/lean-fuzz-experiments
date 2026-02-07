@@ -713,10 +713,10 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         // ================================================================
 
         // ELAB_DECL — custom elaborators
-        ("ELAB_DECL", "elab \"{IDENT}_cmd\" : command => do\n  let env ← Lean.Elab.Command.getEnv\n  Lean.logInfo s!\"env size: \\{env.constants.size}\""),
+        ("ELAB_DECL", "elab \"{IDENT}_cmd\" : command => do\n  let env ← Lean.Elab.Command.getEnv\n  Lean.logInfo s!\"env size: \\{env.constants.size\\}\""),
         ("ELAB_DECL", "elab \"{IDENT}_term\" : term => do\n  return Lean.mkConst ``True"),
         ("ELAB_DECL", "elab \"{IDENT}_tactic\" : tactic => do\n  Lean.Elab.Tactic.evalTactic (← `(tactic| trivial))"),
-        ("ELAB_DECL", "elab \"{IDENT}_cmd\" : command => do\n  let env ← Lean.Elab.Command.getEnv\n  let some info := env.find? `{IDENT}\n    | throwError \"not found\"\n  Lean.logInfo s!\"found: \\{info.name}\""),
+        ("ELAB_DECL", "elab \"{IDENT}_cmd\" : command => do\n  let env ← Lean.Elab.Command.getEnv\n  let some info := env.find? `{IDENT}\n    | throwError \"not found\"\n  Lean.logInfo s!\"found: \\{info.name\\}\""),
 
         // MACRO_DECL — syntax macros
         ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `(sorry)"),
@@ -730,6 +730,34 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{HashMap, HashSet, VecDeque};
+
+    /// Extract nonterminal references from an expansion string.
+    /// `{FOO}` is a reference; `\{...\}` is an escaped literal brace.
+    fn extract_nt_refs(expansion: &str) -> Vec<String> {
+        let bytes = expansion.as_bytes();
+        let mut refs = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'{' && (i == 0 || bytes[i - 1] != b'\\') {
+                // Start of NT reference
+                let start = i + 1;
+                if let Some(end_offset) = expansion[start..].find('}') {
+                    let name = &expansion[start..start + end_offset];
+                    // Skip if this looks like an escaped close brace pair
+                    if !name.is_empty() && !name.contains('\\') {
+                        refs.push(name.to_string());
+                    }
+                    i = start + end_offset + 1;
+                } else {
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+        }
+        refs
+    }
 
     #[test]
     fn rules_nonempty() {
@@ -754,6 +782,171 @@ mod tests {
     fn all_nonterminals_nonempty() {
         for (i, rule) in lean4_rules().iter().enumerate() {
             assert!(!rule[0].is_empty(), "rule {i} has empty nonterminal");
+        }
+    }
+
+    // --- New tests below ---
+
+    #[test]
+    fn no_orphan_nonterminals() {
+        let raw = rules_raw();
+        let defined: HashSet<&str> = raw.iter().map(|(nt, _)| *nt).collect();
+
+        for (i, (nt, expansion)) in raw.iter().enumerate() {
+            for ref_nt in extract_nt_refs(expansion) {
+                assert!(
+                    defined.contains(ref_nt.as_str()),
+                    "rule {i} ({nt}): references undefined nonterminal {{{ref_nt}}}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn all_nonterminals_reachable_from_file() {
+        let raw = rules_raw();
+
+        // Build adjacency: NT -> set of referenced NTs
+        let mut adj: HashMap<&str, HashSet<String>> = HashMap::new();
+        let defined: HashSet<&str> = raw.iter().map(|(nt, _)| *nt).collect();
+        for (nt, expansion) in &raw {
+            let refs = extract_nt_refs(expansion);
+            adj.entry(nt).or_default().extend(refs);
+        }
+
+        // BFS from FILE
+        let mut visited: HashSet<&str> = HashSet::new();
+        let mut queue: VecDeque<&str> = VecDeque::new();
+        queue.push_back("FILE");
+        visited.insert("FILE");
+
+        while let Some(current) = queue.pop_front() {
+            if let Some(neighbors) = adj.get(current) {
+                for neighbor in neighbors {
+                    if let Some(&defined_nt) = defined.iter().find(|&&d| d == neighbor.as_str()) {
+                        if visited.insert(defined_nt) {
+                            queue.push_back(defined_nt);
+                        }
+                    }
+                }
+            }
+        }
+
+        let unreachable: Vec<&str> = defined.iter()
+            .filter(|nt| !visited.contains(**nt))
+            .copied()
+            .collect();
+        assert!(
+            unreachable.is_empty(),
+            "unreachable nonterminals from FILE: {unreachable:?}"
+        );
+    }
+
+    #[test]
+    fn no_duplicate_rules() {
+        let raw = rules_raw();
+        let mut seen: HashSet<(&str, &str)> = HashSet::new();
+        for (i, (nt, expansion)) in raw.iter().enumerate() {
+            assert!(
+                seen.insert((nt, expansion)),
+                "duplicate rule at index {i}: ({nt}, {expansion})"
+            );
+        }
+    }
+
+    #[test]
+    fn escaped_braces_are_balanced() {
+        let raw = rules_raw();
+        for (i, (nt, expansion)) in raw.iter().enumerate() {
+            let open_count = expansion.matches("\\{").count();
+            let close_count = expansion.matches("\\}").count();
+            assert_eq!(
+                open_count, close_count,
+                "rule {i} ({nt}): unbalanced escaped braces (\\{{ = {open_count}, \\}} = {close_count}) in: {expansion}"
+            );
+        }
+    }
+
+    #[test]
+    fn rule_count_regression() {
+        let count = rules_raw().len();
+        assert_eq!(
+            count, 525,
+            "expected exactly 525 rules, got {count} — was a rule accidentally added or removed?"
+        );
+    }
+
+    #[test]
+    fn golden_check_rules_claim_false() {
+        let raw = rules_raw();
+        let golden_theorems: Vec<&str> = raw.iter()
+            .filter(|(nt, _)| *nt == "GOLDEN_THEOREM")
+            .map(|(_, exp)| *exp)
+            .collect();
+
+        assert!(
+            !golden_theorems.is_empty(),
+            "no GOLDEN_THEOREM rules found — soundness oracle is missing"
+        );
+
+        // Every golden theorem must claim something false/impossible
+        let false_indicators = ["False", "0 : Nat) = 1", "2 + 2 : Nat) = 5", "∀ (P : Prop), P", "Empty"];
+        for theorem in &golden_theorems {
+            assert!(
+                false_indicators.iter().any(|ind| theorem.contains(ind)),
+                "GOLDEN_THEOREM doesn't claim something impossible: {theorem}"
+            );
+        }
+    }
+
+    #[test]
+    fn all_grammar_categories_present() {
+        let raw = rules_raw();
+        let defined: HashSet<&str> = raw.iter().map(|(nt, _)| *nt).collect();
+
+        let required = [
+            "FILE", "PREAMBLE", "PROGRAM", "DECL",
+            "DEF_DECL", "THEOREM_DECL", "INDUCTIVE_DECL",
+            "TACTIC", "TACTIC_SEQ", "TERM", "TYPE", "TYPE_ATOM",
+            "PROP_TYPE", "PROOF_TERM", "BINDERS", "BINDER_SINGLE",
+            "ULEVEL", "GOLDEN_CHECK", "GOLDEN_THEOREM",
+            "IDENT", "IDENT_IND", "IDENT_CTOR",
+            "ELAB_DECL", "MACRO_DECL",
+        ];
+
+        for &cat in &required {
+            assert!(
+                defined.contains(cat),
+                "required grammar category {cat} is missing"
+            );
+        }
+    }
+
+    #[test]
+    fn nonterminal_count_per_category() {
+        let raw = rules_raw();
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        for (nt, _) in &raw {
+            *counts.entry(nt).or_default() += 1;
+        }
+
+        // Minimum rule counts for critical nonterminals that need diversity
+        let minimums: &[(&str, usize)] = &[
+            ("TACTIC", 30),
+            ("TERM", 15),
+            ("TYPE", 5),
+            ("PROOF_TERM", 10),
+            ("INDUCTIVE_DECL", 10),
+            ("IDENT", 10),
+            ("IDENT_IND", 10),
+        ];
+
+        for &(nt, min) in minimums {
+            let actual = counts.get(nt).copied().unwrap_or(0);
+            assert!(
+                actual >= min,
+                "{nt} has only {actual} rules, expected at least {min} for diversity"
+            );
         }
     }
 }
