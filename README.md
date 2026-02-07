@@ -23,3 +23,10 @@ LEAN4EXPORT_PATH=<path-to>/lean4export/.lake/build/bin/lean4export
 COMPARATOR_PATH=<path-to>/comparator/.lake/build/bin/comparator
 ```
 
+### Lean 4 source (optional)
+For development, clone the Lean 4 source into the repo root for reference:
+```sh
+git clone https://github.com/leanprover/lean4.git lean4
+```
+This is gitignored and used only for searching the compiler source.
+

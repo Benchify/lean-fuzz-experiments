@@ -35,6 +35,19 @@ The pipeline depends on two external Lean tools that must be cloned and built se
    ```
 
 
+## Lean 4 Source (Local Reference)
+The Lean 4 compiler source is cloned at `lean4/` (gitignored, not a submodule). It exists solely for agentic search during development — never modify it.
+
+Key directories for fuzzing research:
+- `lean4/src/kernel/` — C++ kernel (the ultimate fuzzing target): type_checker.cpp, inductive types, universe levels
+- `lean4/src/Lean/Parser/` — Parser/syntax definitions (grammar rules for valid Lean code)
+- `lean4/src/Lean/Elab/` — Elaborator (translates surface syntax → kernel terms)
+- `lean4/src/Lean/Environment.lean` — Declaration types and the trusted environment
+
+External references:
+- [lean4lean](https://github.com/digama0/lean4lean) — Pure Lean 4 reimplementation of the kernel
+- [Type Checking in Lean 4](https://ammkrn.github.io/type_checking_in_lean4/) — Comprehensive kernel architecture guide
+
 ## Success Criteria: The "False" Proof
 We are specifically hunting for Semantic Divergence. In a successful exploit, the fuzzer would produce a file that:
 - Passes the Lean Elaborator without errors.

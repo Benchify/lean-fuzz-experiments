@@ -13,3 +13,6 @@ htmlcov
 target/
 
 .env
+
+# just for data to agentically search over
+lean4/
