@@ -1,0 +1,10 @@
+name = "template"
+version = "0.1.0"
+defaultTargets = ["template"]
+
+[[lean_lib]]
+name = "Template"
+
+[[lean_exe]]
+name = "template"
+root = "Main"
