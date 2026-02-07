@@ -3,5 +3,16 @@ name = "generator"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "generator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "generator"
+path = "src/main.rs"
+
 [dependencies]
-libafl = "0.15.4"
+libafl = { version = "0.15.4", features = ["nautilus"] }
+libafl_bolts = "0.15.4"
+log = "0.4"
+env_logger = "0.11"
