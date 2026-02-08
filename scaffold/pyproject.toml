@@ -15,11 +15,14 @@ dependencies = [
 ]
 
 [project.scripts]
-scaffold = "scaffold:main"
+scaffold = "scaffold.runner:main"
 stress-gen = "stress_gen:main"
 
 [tool.ruff.lint]
 select = ["F", "UP", "I", "D", "PT"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/scaffold/runner.py" = ["PT"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
