@@ -69,3 +69,5 @@ This approach bypasses the "shallow" bugs of the frontend and aims directly at t
 
 ## Dev Guidelines
 Always open a PR using the github CLI when you're ready to push code. Don't push to main.
+
+When you complete a task that corresponds to a checkbox in `docs/design-plan.md`, mark it as done (`- [x]`) in the design plan as part of the same commit.
