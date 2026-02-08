@@ -9,7 +9,7 @@ use clap::Parser;
 use comfy_table::{Table, Cell, Color, Attribute, presets::UTF8_FULL};
 use tempfile::TempDir;
 use fs_extra::dir::CopyOptions;
-use libafl::corpus::{InMemoryCorpus, OnDiskCorpus};
+use libafl::corpus::OnDiskCorpus;
 use libafl::events::{EventConfig, llmp::setup_restarting_mgr_std};
 use libafl::executors::{ExitKind, InProcessExecutor};
 use libafl::feedbacks::nautilus::{NautilusChunksMetadata, NautilusFeedback};
@@ -328,13 +328,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut nautilus_feedback = NautilusFeedback::new(&ctx);
     let mut crash_feedback = CrashFeedback::new();
 
-    // State (use pass_pass_pass as main corpus - the ultimate golden signals!)
-    // state_opt is Some(state) if we're restoring, None if first run
+    // State - Use ONLY disk corpus (no in-memory) to prevent RAM exhaustion
     let golden_dir = results_dir.join("lake_pass_comp_pass_safe_pass");
     let mut state = state_opt.unwrap_or_else(|| {
         StdState::new(
             StdRand::with_seed(current_nanos()),
-            InMemoryCorpus::<NautilusInput>::new(),
+            OnDiskCorpus::new(&golden_dir).expect("Failed to create corpus dir"),
             OnDiskCorpus::new(&golden_dir).expect("Failed to create corpus dir"),
             &mut nautilus_feedback,
             &mut crash_feedback,
@@ -394,6 +393,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Categorize and save
         let is_crash = categorize_and_save(lake_success, comparator_success, safeverify_success, &code, &stats_clone);
+
+        // Explicit cleanup - drop temp_dir before returning
+        drop(_temp_dir);
+        std::thread::sleep(std::time::Duration::from_millis(10));  // Give OS time to cleanup
 
         if is_crash {
             ExitKind::Crash

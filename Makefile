@@ -1,7 +1,7 @@
 # Lean 4 Soundness Fuzzer Makefile
 
 # Configuration
-JOBS ?= 2
+JOBS ?= 1
 DEPTH ?= 15
 
 .PHONY: run build test clean help deps
