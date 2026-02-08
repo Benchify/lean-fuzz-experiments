@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use comfy_table::{Table, Cell, Color, Attribute, presets::UTF8_FULL};
 use tempfile::TempDir;
 use fs_extra::dir::CopyOptions;
 use libafl::corpus::{InMemoryCorpus, OnDiskCorpus};
@@ -82,12 +83,17 @@ impl VerifierStats {
         }
 
         let runtime = self.start_time.elapsed();
-        println!("\n╔═══════════════════════════════════════════════════════╗");
-        println!("║ VERIFIER STATS - {} executions ({:.0?})",
-            total, runtime);
-        println!("╠═══════╤════════════╤═══════════╤═══════╤═══════╤═══════╣");
-        println!("║ Lake  │ Comparator │ SafeVerify │ Count │   %   │ Note  ║");
-        println!("╠═══════╪════════════╪═══════════╪═══════╪═══════╪═══════╣");
+
+        let mut table = Table::new();
+        table.load_preset(UTF8_FULL)
+             .set_header(vec![
+                 Cell::new("Lake").add_attribute(Attribute::Bold),
+                 Cell::new("Comparator").add_attribute(Attribute::Bold),
+                 Cell::new("SafeVerify").add_attribute(Attribute::Bold),
+                 Cell::new("Count").add_attribute(Attribute::Bold),
+                 Cell::new("%").add_attribute(Attribute::Bold),
+                 Cell::new("").add_attribute(Attribute::Bold),
+             ]);
 
         for (idx, counter) in self.counters.iter().enumerate() {
             let count = counter.load(Ordering::Relaxed);
@@ -98,24 +104,31 @@ impl VerifierStats {
             let safe = idx & 1 == 1;
             let pct = (count as f64 / total as f64) * 100.0;
 
-            let (lake_s, comp_s, safe_s) = (
-                if lake { "PASS" } else { "FAIL" },
-                if comp { "PASS" } else { "FAIL" },
-                if safe { "PASS" } else { "FAIL" },
+            let (lake_cell, comp_cell, safe_cell) = (
+                if lake { Cell::new("PASS").fg(Color::Green) } else { Cell::new("FAIL").fg(Color::Red) },
+                if comp { Cell::new("PASS").fg(Color::Green) } else { Cell::new("FAIL").fg(Color::Red) },
+                if safe { Cell::new("PASS").fg(Color::Green) } else { Cell::new("FAIL").fg(Color::Red) },
             );
 
-            let note = match (lake, comp, safe) {
-                (true, true, true) => "🎯🎯🎯 ULTIMATE",
-                (true, true, false) => "!!! GOLDEN",
-                (true, false, true) => "?! DIVERGE",
-                _ => "",
+            let (note, color) = match (lake, comp, safe) {
+                (true, true, true) => ("🎯🎯🎯 ULTIMATE", Color::Magenta),
+                (true, true, false) => ("!!! GOLDEN", Color::Yellow),
+                (true, false, true) => ("?! DIVERGE", Color::Cyan),
+                _ => ("", Color::Reset),
             };
 
-            println!("║ {:5} │ {:10} │ {:10} │ {:5} │ {:5.1}% │ {:9} ║",
-                lake_s, comp_s, safe_s, count, pct, note);
+            table.add_row(vec![
+                lake_cell,
+                comp_cell,
+                safe_cell,
+                Cell::new(count.to_string()),
+                Cell::new(format!("{:.1}%", pct)),
+                Cell::new(note).fg(color),
+            ]);
         }
 
-        println!("╚═══════╧════════════╧═══════════╧═══════╧═══════╧═══════╝\n");
+        println!("\n{}", table);
+        println!("📊 Total: {} executions in {:.0?}\n", total, runtime);
     }
 }
 
