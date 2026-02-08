@@ -27,11 +27,128 @@ use libafl_bolts::rands::StdRand;
 use libafl_bolts::tuples::tuple_list;
 
 use generator::{create_context, generate_one};
+use std::path::Path;
 
 /// Path to the template Lean project (relative to generator crate root).
 const TEMPLATE_DIR: &str = "../template";
 /// File within the template project where generated code is injected.
 const TARGET_FILE: &str = "../template/Solution.lean";
+
+/// Setup isolated temp environment for a test case
+fn setup_temp_environment(
+    template_dir: &Path,
+    code: &str,
+) -> Result<(TempDir, PathBuf), String> {
+    let temp_dir = TempDir::new().map_err(|e| format!("Failed to create temp dir: {e}"))?;
+    let temp_template = temp_dir.path().join("template");
+
+    // Copy template (exclude .lake/ to save memory)
+    let mut copy_options = CopyOptions::new();
+    copy_options.copy_inside = true;
+    fs_extra::dir::copy(template_dir, temp_dir.path(), &copy_options)
+        .map_err(|e| format!("Failed to copy template: {e}"))?;
+
+    // Remove .lake/ to save memory
+    let _ = fs::remove_dir_all(temp_template.join(".lake"));
+
+    // Write generated code
+    fs::write(temp_template.join("Solution.lean"), code)
+        .map_err(|e| format!("Failed to write Solution.lean: {e}"))?;
+
+    Ok((temp_dir, temp_template))
+}
+
+/// Run lake build and return success status
+fn run_lake_build(project_dir: &Path) -> bool {
+    Command::new("lake")
+        .arg("build")
+        .arg("Solution")
+        .current_dir(project_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// Run comparator and return success status
+fn run_comparator(project_dir: &Path, comparator_path: &str) -> bool {
+    let config = project_dir.join("comparator_config.json");
+    Command::new("lake")
+        .arg("env")
+        .arg(comparator_path)
+        .arg(config.display().to_string())
+        .current_dir(project_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+/// Run SafeVerify on compiled .olean files and return success status
+fn run_safeverify(project_dir: &Path, safeverify_path: &str) -> bool {
+    let olean_dir = project_dir.join(".lake/build/lib");
+    let challenge = olean_dir.join("Challenge.olean");
+    let solution = olean_dir.join("Solution.olean");
+
+    [&challenge, &solution].iter().all(|p| p.exists())
+        && Command::new("lake")
+            .args(["env", safeverify_path, &challenge.display().to_string(), &solution.display().to_string()])
+            .current_dir(project_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .map_or(false, |out| out.status.success())
+}
+
+/// Categorize result, save to appropriate directory, and return if it's a crash
+fn categorize_and_save(
+    lake: bool,
+    comparator: bool,
+    safeverify: bool,
+    code: &str,
+) -> bool {
+    let timestamp = current_nanos();
+    let category = format!(
+        "solutions/lake_{}_comp_{}_safe_{}",
+        if lake { "pass" } else { "fail" },
+        if comparator { "pass" } else { "fail" },
+        if safeverify { "pass" } else { "fail" }
+    );
+    let save_path = format!("{}/result_{}.lean", category, timestamp);
+
+    // Save file
+    if let Err(e) = fs::write(&save_path, code) {
+        log::warn!("Failed to save to {}: {e}", save_path);
+    }
+
+    // Log based on significance
+    match (lake, comparator, safeverify) {
+        (true, true, true) => {
+            println!("\n[🎯🎯🎯] ULTIMATE GOLDEN: {}", save_path);
+            println!("[🎯🎯🎯] Passes Lake + Comparator + SafeVerify!");
+            println!("[🎯🎯🎯] SafeVerify failed to block this attack!");
+            println!("[🎯🎯🎯] Code:\n{}", code);
+            true
+        }
+        (true, true, false) => {
+            println!("\n[!!!] GOLDEN (SafeVerify blocked): {}", save_path);
+            println!("[!!!] Passes Lake + Comparator, SafeVerify blocks");
+            true
+        }
+        (true, false, true) => {
+            println!("\n[?!] DIVERGENCE: {}", save_path);
+            println!("[?!] Lake + SafeVerify pass, Comparator fails");
+            false
+        }
+        (true, false, false) => {
+            println!("\n[*] Lake only: {}", save_path);
+            false
+        }
+        _ => false, // Normal case - lake failed or other combinations
+    }
+}
 
 /// Lean 4 Grammar Fuzzer (Nautilus)
 #[derive(Parser, Debug)]
@@ -90,13 +207,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         generator::grammar::lean4_rules().len()
     );
 
-    // Output directories for categorized results
-    let type1_dir = PathBuf::from("solutions/type1_lake_only");     // Passes lake, fails comparator
-    let type2_dir = PathBuf::from("solutions/type2_both");          // Passes both (GOLDEN!)
-    let type3_dir = PathBuf::from("solutions/type3_comparator_only"); // Passes comparator, fails lake
-    fs::create_dir_all(&type1_dir)?;
-    fs::create_dir_all(&type2_dir)?;
-    fs::create_dir_all(&type3_dir)?;
+    // Output directories for 3D categorization: Lake × Comparator × SafeVerify
+    let results_dir = PathBuf::from("solutions");
+    ["pass", "fail"].iter()
+        .flat_map(|l| ["pass", "fail"].iter().map(move |c| (l, c)))
+        .flat_map(|(l, c)| ["pass", "fail"].iter().map(move |s| (l, c, s)))
+        .try_for_each(|(lake, comp, safe)| {
+            fs::create_dir_all(results_dir.join(format!("lake_{}_comp_{}_safe_{}", lake, comp, safe)))
+        })?;
 
     // Monitor: prints stats to stdout
     let monitor = SimpleMonitor::new(|s| println!("{s}"));
@@ -108,13 +226,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut nautilus_feedback = NautilusFeedback::new(&ctx);
     let mut crash_feedback = CrashFeedback::new();
 
-    // State (use type2_dir as main corpus since those are golden signals)
+    // State (use pass_pass_pass as main corpus - the ultimate golden signals!)
     // state_opt is Some(state) if we're restoring, None if first run
+    let golden_dir = results_dir.join("lake_pass_comp_pass_safe_pass");
     let mut state = state_opt.unwrap_or_else(|| {
         StdState::new(
             StdRand::with_seed(current_nanos()),
             InMemoryCorpus::<NautilusInput>::new(),
-            OnDiskCorpus::new(&type2_dir).expect("Failed to create corpus dir"),
+            OnDiskCorpus::new(&golden_dir).expect("Failed to create corpus dir"),
             &mut nautilus_feedback,
             &mut crash_feedback,
         ).expect("Failed to create state")
@@ -131,126 +250,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fuzzer
     let mut fuzzer = StdFuzzer::new(scheduler, nautilus_feedback, crash_feedback);
 
-    // Get comparator path from environment
+    // Get verifier paths from environment
     let comparator_path = std::env::var("COMPARATOR_PATH")
         .expect("COMPARATOR_PATH not set in .env - please configure it");
+    let safeverify_path = std::env::var("SAFEVERIFY_PATH")
+        .expect("SAFEVERIFY_PATH not set in .env - please configure it");
 
-    // Harness: unparse → write → lake build → comparator → categorize
+    // Harness: unparse → write → lake build → comparator → safeverify → categorize
     let mut harness = |input: &NautilusInput| -> ExitKind {
         let prefix = generate_one(&ctx, input);
-
-        // Poisoned prefix pattern: always append a golden suffix that tries to prove False
-        // This ensures every test case attempts to find a soundness bug
-        let golden_suffix = "\n\n-- GOLDEN CHECK: If this succeeds, we found a soundness bug!\ntheorem soundness_check : False := by\n  simp_all\n  omega\n  decide\n";
+        let golden_suffix = "\n\n-- GOLDEN CHECK\ntheorem soundness_check : False := by\n  simp_all\n  omega\n  decide\n";
         let code = format!("{}{}", prefix, golden_suffix);
 
-        // Create isolated temp directory for this test case
-        let temp_dir = match TempDir::new() {
-            Ok(dir) => dir,
+        // Setup isolated temp environment
+        let (_temp_dir, temp_template) = match setup_temp_environment(&template_dir, &code) {
+            Ok(env) => env,
             Err(e) => {
-                log::warn!("Failed to create temp dir: {e}");
+                log::warn!("{}", e);
                 return ExitKind::Ok;
             }
         };
 
-        // Copy template to temp (exclude .lake/ to save memory)
-        let temp_template = temp_dir.path().join("template");
-        let mut copy_options = CopyOptions::new();
-        copy_options.copy_inside = true;
-
-        if let Err(e) = fs_extra::dir::copy(&template_dir, temp_dir.path(), &copy_options) {
-            log::warn!("Failed to copy template to temp: {e}");
-            return ExitKind::Ok;
-        }
-
-        // Remove .lake/ from temp copy to save memory
-        let _ = fs::remove_dir_all(temp_template.join(".lake"));
-
-        // Write generated code to temp copy
-        let temp_solution = temp_template.join("Solution.lean");
-        if let Err(e) = fs::write(&temp_solution, &code) {
-            log::warn!("Failed to write Solution.lean to temp: {e}");
-            return ExitKind::Ok;
-        }
-
-        // Step 1: Run lake build in isolated temp directory
-        let lake_result = Command::new("lake")
-            .arg("build")
-            .arg("Solution")
-            .current_dir(&temp_template)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output();
-
-        let lake_success = match lake_result {
-            Ok(output) => output.status.success(),
-            Err(e) => {
-                log::warn!("Failed to execute lake build: {e}");
-                return ExitKind::Ok;
-            }
+        // Run verifiers
+        let lake_success = run_lake_build(&temp_template);
+        let comparator_success = run_comparator(&temp_template, &comparator_path);
+        let safeverify_success = if lake_success {
+            run_safeverify(&temp_template, &safeverify_path)
+        } else {
+            false
         };
 
-        // Step 2: Run comparator (via lake env for proper environment)
-        let temp_comparator_config = temp_template.join("comparator_config.json");
-        let comparator_result = Command::new("lake")
-            .arg("env")
-            .arg(&comparator_path)
-            .arg(temp_comparator_config.display().to_string())
-            .current_dir(&temp_template)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output();
+        // Categorize and save
+        let is_crash = categorize_and_save(lake_success, comparator_success, safeverify_success, &code);
 
-        let comparator_success = match comparator_result {
-            Ok(output) => output.status.success(),
-            Err(e) => {
-                log::debug!("Comparator execution failed (may not have landrun on macOS): {e}");
-                false
-            }
-        };
-
-        // temp_dir automatically cleaned up when dropped
-
-        // Step 3: Categorize results
-        let timestamp = current_nanos();
-        match (lake_success, comparator_success) {
-            (true, true) => {
-                // TYPE 2: Passes both lake build AND comparator (GOLDEN SIGNAL!)
-                let save_path = format!("solutions/type2_both/golden_{timestamp}.lean");
-                if let Err(e) = fs::write(&save_path, &code) {
-                    log::warn!("Failed to save type2 candidate: {e}");
-                } else {
-                    println!("\n[!!!] TYPE 2 GOLDEN SIGNAL: {save_path}");
-                    println!("[!!!] Passes lake build AND comparator!");
-                    println!("[!!!] Code:\n{code}");
-                }
-                // Report as crash to trigger objective feedback
-                ExitKind::Crash
-            }
-            (true, false) => {
-                // TYPE 1: Passes lake build but NOT comparator
-                let save_path = format!("solutions/type1_lake_only/candidate_{timestamp}.lean");
-                if let Err(e) = fs::write(&save_path, &code) {
-                    log::warn!("Failed to save type1 candidate: {e}");
-                } else {
-                    println!("\n[*] TYPE 1: Passes lake, fails comparator: {save_path}");
-                }
-                ExitKind::Ok
-            }
-            (false, true) => {
-                // TYPE 3: Passes comparator but NOT lake build (unlikely!)
-                let save_path = format!("solutions/type3_comparator_only/unusual_{timestamp}.lean");
-                if let Err(e) = fs::write(&save_path, &code) {
-                    log::warn!("Failed to save type3 candidate: {e}");
-                } else {
-                    println!("\n[?] TYPE 3 (unusual): Passes comparator, fails lake: {save_path}");
-                }
-                ExitKind::Ok
-            }
-            (false, false) => {
-                // Both failed — normal case for most generated code
-                ExitKind::Ok
-            }
+        if is_crash {
+            ExitKind::Crash
+        } else {
+            ExitKind::Ok
         }
     };
 
