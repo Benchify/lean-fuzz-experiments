@@ -114,10 +114,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Harness: unparse → write → lake build → comparator → categorize
     let mut harness = |input: &NautilusInput| -> ExitKind {
-        let code = generate_one(&ctx, input);
+        let prefix = generate_one(&ctx, input);
 
-        // The generated code IS the full Lean file (including any attempt to prove False)
-        // We write it directly to Solution.lean without wrapping
+        // Poisoned prefix pattern: always append a golden suffix that tries to prove False
+        // This ensures every test case attempts to find a soundness bug
+        let golden_suffix = "\n\n-- GOLDEN CHECK: If this succeeds, we found a soundness bug!\ntheorem soundness_check : False := by\n  simp_all\n  omega\n  decide\n";
+        let code = format!("{}{}", prefix, golden_suffix);
+
         if let Err(e) = fs::write(&target_file, &code) {
             log::warn!("Failed to write Solution.lean: {e}");
             return ExitKind::Ok;
