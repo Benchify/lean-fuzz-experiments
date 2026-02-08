@@ -6,7 +6,7 @@ use clap::Parser;
 use tempfile::TempDir;
 use fs_extra::dir::CopyOptions;
 use libafl::corpus::{InMemoryCorpus, OnDiskCorpus};
-use libafl::events::SimpleEventManager;
+use libafl::events::{EventConfig, llmp::setup_restarting_mgr_std};
 use libafl::executors::{ExitKind, InProcessExecutor};
 use libafl::feedbacks::nautilus::{NautilusChunksMetadata, NautilusFeedback};
 use libafl::feedbacks::CrashFeedback;
@@ -40,6 +40,10 @@ struct Args {
     /// Maximum tree depth for grammar generation
     #[arg(short, long, default_value_t = 15)]
     depth: usize,
+
+    /// Number of parallel workers (0 = number of CPUs)
+    #[arg(short = 'j', long, default_value_t = 1)]
+    jobs: usize,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,6 +53,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenvy::from_filename("../.env").or_else(|_| dotenvy::from_filename(".env"));
 
     let args = Args::parse();
+
+    // Determine number of cores
+    let cores = if args.jobs == 0 {
+        num_cpus::get()
+    } else {
+        args.jobs
+    };
+
+    println!("[*] Lean 4 Grammar Fuzzer (Nautilus)");
+    println!("[*] Using {} parallel worker cores", cores);
+    println!("[*] Tree depth: {}", args.depth);
 
     let template_dir = PathBuf::from(TEMPLATE_DIR)
         .canonicalize()
@@ -82,23 +97,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Monitor: prints stats to stdout
     let monitor = SimpleMonitor::new(|s| println!("{s}"));
-    let mut mgr = SimpleEventManager::new(monitor);
+
+    // Event manager: multi-core with shared corpus via LLMP
+    let (state_opt, mut mgr) = setup_restarting_mgr_std(monitor, 1337, EventConfig::AlwaysUnique)?;
 
     // Feedbacks
     let mut nautilus_feedback = NautilusFeedback::new(&ctx);
     let mut crash_feedback = CrashFeedback::new();
 
     // State (use type2_dir as main corpus since those are golden signals)
-    let mut state = StdState::new(
-        StdRand::with_seed(current_nanos()),
-        InMemoryCorpus::<NautilusInput>::new(),
-        OnDiskCorpus::new(&type2_dir)?,
-        &mut nautilus_feedback,
-        &mut crash_feedback,
-    )?;
+    // state_opt is Some(state) if we're restoring, None if first run
+    let mut state = state_opt.unwrap_or_else(|| {
+        StdState::new(
+            StdRand::with_seed(current_nanos()),
+            InMemoryCorpus::<NautilusInput>::new(),
+            OnDiskCorpus::new(&type2_dir).expect("Failed to create corpus dir"),
+            &mut nautilus_feedback,
+            &mut crash_feedback,
+        ).expect("Failed to create state")
+    });
 
     // Register Nautilus chunk metadata (required by NautilusFeedback and splice mutator)
-    state.add_metadata(NautilusChunksMetadata::new("workdir".to_string()));
+    if !state.has_metadata::<NautilusChunksMetadata>() {
+        state.add_metadata(NautilusChunksMetadata::new("workdir".to_string()));
+    }
 
     // Scheduler
     let scheduler = QueueScheduler::new();
