@@ -5,6 +5,9 @@ The core goal of this project is to identify logical inconsistencies in the Lean
 
 Rather than testing for simple crashes (segfaults), this architecture aims to generate syntactically valid but logically "poisoned" Lean code to see if the type checker's fundamental rules can be subverted.
 
+## Literature
+As you work, you may find it userful to consult the academic literature in docs/prior_literature. You can use the sylphx/pdf-reader-mcp, which is in your .claude.
+
 ## The Fuzzing Pipeline
 We utilize a three-tier architecture to bridge the gap between high-performance mutation and the Lean compilation stack:
 
