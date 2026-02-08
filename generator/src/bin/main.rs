@@ -43,8 +43,8 @@ const TARGET_FILE: &str = "../template/Solution.lean";
 
 #[derive(Debug)]
 struct VerifierStats {
-    counters: [AtomicUsize; 8],
-    seen: [AtomicUsize; 8],
+    counters: [AtomicUsize; 16],
+    seen: [AtomicUsize; 16],
     last_print: Mutex<Instant>,
     start_time: Instant,
 }
@@ -59,23 +59,24 @@ impl VerifierStats {
         }
     }
 
-    fn record(&self, lake: bool, comp: bool, safe: bool) {
-        let idx = (lake as usize) << 2 | (comp as usize) << 1 | (safe as usize);
+    fn record(&self, syntax: bool, lake: bool, comp: bool, safe: bool) {
+        let idx = (syntax as usize) << 3 | (lake as usize) << 2 | (comp as usize) << 1 | (safe as usize);
         let prev = self.counters[idx].fetch_add(1, Ordering::Relaxed);
 
         if prev == 0 && self.seen[idx].fetch_add(1, Ordering::Relaxed) == 0 {
-            let (l, c, s) = (
+            let (syn, l, c, s) = (
+                if syntax { "PASS" } else { "FAIL" },
                 if lake { "PASS" } else { "FAIL" },
                 if comp { "PASS" } else { "FAIL" },
                 if safe { "PASS" } else { "FAIL" },
             );
-            let note = match (lake, comp, safe) {
-                (true, true, true) => " 🎯🎯🎯 ULTIMATE!",
-                (true, true, false) => " !!! GOLDEN",
-                (true, false, true) => " ?! DIVERGENCE",
+            let note = match (syntax, lake, comp, safe) {
+                (true, true, true, true) => " 🎯🎯🎯 ULTIMATE!",
+                (true, true, true, false) => " !!! GOLDEN",
+                (true, true, false, true) => " ?! DIVERGENCE",
                 _ => "",
             };
-            println!("\n🔔 NEW CATEGORY: Lake={} Comp={} Safe={}{}", l, c, s, note);
+            println!("\n🔔 NEW CATEGORY: Syntax={} Lake={} Comp={} Safe={}{}", syn, l, c, s, note);
         }
     }
 
@@ -95,6 +96,7 @@ impl VerifierStats {
         let runtime = self.start_time.elapsed();
         let mut table = Table::new();
         table.load_preset(UTF8_FULL).set_header(vec![
+            Cell::new("Syntax").add_attribute(Attribute::Bold),
             Cell::new("Lake").add_attribute(Attribute::Bold),
             Cell::new("Comparator").add_attribute(Attribute::Bold),
             Cell::new("SafeVerify").add_attribute(Attribute::Bold),
@@ -106,6 +108,7 @@ impl VerifierStats {
             let count = counter.load(Ordering::Relaxed);
             if count == 0 { continue; }
 
+            let syntax = (idx >> 3) & 1 == 1;
             let lake = (idx >> 2) & 1 == 1;
             let comp = (idx >> 1) & 1 == 1;
             let safe = idx & 1 == 1;
@@ -113,15 +116,15 @@ impl VerifierStats {
 
             let pass = |b: bool| if b { Cell::new("PASS").fg(Color::Green) } else { Cell::new("FAIL").fg(Color::Red) };
 
-            let note = match (lake, comp, safe) {
-                (true, true, true) => " 🎯🎯🎯",
-                (true, true, false) => " !!!",
-                (true, false, true) => " ?!",
+            let note = match (syntax, lake, comp, safe) {
+                (true, true, true, true) => " 🎯🎯🎯",
+                (true, true, true, false) => " !!!",
+                (true, true, false, true) => " ?!",
                 _ => "",
             };
 
             table.add_row(vec![
-                pass(lake), pass(comp), pass(safe),
+                pass(syntax), pass(lake), pass(comp), pass(safe),
                 Cell::new(count.to_string()),
                 Cell::new(format!("{:.1}%{}", pct, note)),
             ]);
@@ -144,11 +147,13 @@ impl VerifierStats {
         for (idx, counter) in self.counters.iter().enumerate() {
             let count = counter.load(Ordering::Relaxed);
             if count == 0 { continue; }
+            let syntax = (idx >> 3) & 1 == 1;
             let lake = (idx >> 2) & 1 == 1;
             let comp = (idx >> 1) & 1 == 1;
             let safe = idx & 1 == 1;
             let pct = (count as f64 / total as f64) * 100.0;
-            writeln!(report, "- Lake={} Comp={} Safe={}: {} ({:.1}%)",
+            writeln!(report, "- Syntax={} Lake={} Comp={} Safe={}: {} ({:.1}%)",
+                if syntax {"PASS"} else {"FAIL"},
                 if lake {"PASS"} else {"FAIL"},
                 if comp {"PASS"} else {"FAIL"},
                 if safe {"PASS"} else {"FAIL"},
@@ -178,12 +183,23 @@ fn setup_temp_environment(template_dir: &Path, code: &str) -> Result<(TempDir, P
     Ok((temp_dir, temp_template))
 }
 
-fn run_lake_build(dir: &Path) -> bool {
-    Command::new("lake").args(["build", "Solution"])
+fn run_lake_build(dir: &Path) -> (bool, String) {
+    match Command::new("lake").args(["build", "Solution"])
         .current_dir(dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .output().map_or(false, |o| o.status.success())
+        .output() {
+        Ok(o) => (o.status.success(), String::from_utf8_lossy(&o.stderr).to_string()),
+        Err(_) => (false, String::new()),
+    }
+}
+
+fn has_parse_error(stderr: &str) -> bool {
+    // Parse errors indicate syntax invalidity. Patterns from scaffold/src/scaffold/diagnostics.py
+    stderr.contains("expected") ||
+    stderr.contains("unexpected") ||
+    stderr.contains("unknown identifier") && stderr.contains("available?") ||
+    stderr.contains("invalid")
 }
 
 fn run_comparator(dir: &Path, bin: &str) -> bool {
@@ -206,31 +222,32 @@ fn run_safeverify(dir: &Path, bin: &str) -> bool {
             .output().map_or(false, |o| o.status.success())
 }
 
-fn categorize_and_save(lake: bool, comp: bool, safe: bool, code: &str, stats: &VerifierStats) -> bool {
-    stats.record(lake, comp, safe);
+fn categorize_and_save(syntax: bool, lake: bool, comp: bool, safe: bool, code: &str, stats: &VerifierStats) -> bool {
+    stats.record(syntax, lake, comp, safe);
     stats.print_if_due();
 
-    let cat = format!("solutions/lake_{}_comp_{}_safe_{}",
+    let cat = format!("solutions/syntax_{}_lake_{}_comp_{}_safe_{}",
+        if syntax {"pass"} else {"fail"},
         if lake {"pass"} else {"fail"},
         if comp {"pass"} else {"fail"},
         if safe {"pass"} else {"fail"});
     let path = format!("{}/result_{}.lean", cat, current_nanos());
     let _ = fs::write(&path, code);
 
-    match (lake, comp, safe) {
-        (true, true, true) => {
+    match (syntax, lake, comp, safe) {
+        (true, true, true, true) => {
             println!("\n[🎯🎯🎯] ULTIMATE: {}\n{}", path, code);
             true
         }
-        (true, true, false) => {
+        (true, true, true, false) => {
             println!("\n[!!!] GOLDEN (SafeVerify blocked): {}", path);
             true
         }
-        (true, false, true) => {
+        (true, true, false, true) => {
             println!("\n[?!] DIVERGENCE: {}", path);
             false
         }
-        (true, false, false) => {
+        (true, true, false, false) => {
             println!("\n[*] Lake only: {}", path);
             false
         }
@@ -302,10 +319,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let artifacts_dir = PathBuf::from("../artifacts/generator-reports");
     fs::create_dir_all(&artifacts_dir)?;
     ["pass", "fail"].iter()
-        .flat_map(|l| ["pass", "fail"].iter().map(move |c| (l, c)))
-        .flat_map(|(l, c)| ["pass", "fail"].iter().map(move |s| (l, c, s)))
-        .try_for_each(|(l, c, s)| {
-            fs::create_dir_all(results_dir.join(format!("lake_{}_comp_{}_safe_{}", l, c, s)))
+        .flat_map(|syn| ["pass", "fail"].iter().map(move |l| (syn, l)))
+        .flat_map(|(syn, l)| ["pass", "fail"].iter().map(move |c| (syn, l, c)))
+        .flat_map(|(syn, l, c)| ["pass", "fail"].iter().map(move |s| (syn, l, c, s)))
+        .try_for_each(|(syn, l, c, s)| {
+            fs::create_dir_all(results_dir.join(format!("syntax_{}_lake_{}_comp_{}_safe_{}", syn, l, c, s)))
         })?;
 
     // LibAFL setup
@@ -313,7 +331,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mgr = SimpleEventManager::new(monitor);
     let mut nautilus_feedback = NautilusFeedback::new(&ctx);
     let mut crash_feedback = CrashFeedback::new();
-    let golden_dir = results_dir.join("lake_pass_comp_pass_safe_pass");
+    let golden_dir = results_dir.join("syntax_pass_lake_pass_comp_pass_safe_pass");
     let mut state = StdState::new(
         StdRand::with_seed(current_nanos()),
         InMemoryCorpus::<NautilusInput>::new(),
@@ -348,8 +366,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // Quick check: does the prefix alone compile?
-        if !run_lake_build(&temp) {
-            stats_ref.record(false, false, false);
+        let (prefix_builds, prefix_stderr) = run_lake_build(&temp);
+        let prefix_syntax_valid = prefix_builds || !has_parse_error(&prefix_stderr);
+
+        if !prefix_builds {
+            stats_ref.record(prefix_syntax_valid, false, false, false);
             stats_ref.print_if_due();
             return ExitKind::Ok;
         }
@@ -360,18 +381,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let code = format!("{}{}", prefix, golden_suffix);
             // Overwrite Solution.lean with prefix+suffix
             if fs::write(temp.join("Solution.lean"), &code).is_err() { continue; }
-            if !run_lake_build(&temp) { continue; }
+            let (builds, _stderr) = run_lake_build(&temp);
+            if !builds { continue; }
 
             // This suffix compiled! Run verifiers.
             let comp = run_comparator(&temp, &comparator_path);
             let safe = run_safeverify(&temp, &safeverify_path);
 
-            println!("[*] suffix={} lake=PASS comp={} safe={}",
+            println!("[*] suffix={} syntax=PASS lake=PASS comp={} safe={}",
                 suffix_name,
                 if comp { "PASS" } else { "FAIL" },
                 if safe { "PASS" } else { "FAIL" });
 
-            if categorize_and_save(true, comp, safe, &code, &stats_ref) {
+            if categorize_and_save(true, true, comp, safe, &code, &stats_ref) {
                 best_is_crash = true;
             }
         }
@@ -416,7 +438,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(p) = stats.save_report(&artifacts_dir) {
         println!("📄 Summary: {}", p.display());
     }
-    println!("📁 Results: generator/solutions/lake_*_comp_*_safe_*/");
+    println!("📁 Results: generator/solutions/syntax_*_lake_*_comp_*_safe_*/");
 
     fuzz_result?;
     Ok(())
