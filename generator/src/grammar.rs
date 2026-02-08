@@ -73,7 +73,6 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("DECL", "{DEF_DECL}"),
         ("DECL", "{THEOREM_DECL}"),
         ("DECL", "{INDUCTIVE_DECL}"),
-        ("DECL", "{AXIOM_DECL}"),
         ("DECL", "{CLASS_DECL}"),
         ("DECL", "{INSTANCE_DECL}"),
         ("DECL", "{STRUCTURE_DECL}"),
@@ -172,12 +171,6 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("CTOR_TYPE_PARAM", "{IDENT_IND} α → {IDENT_IND} α"),
         ("CTOR_TYPE_PARAM", "List ({IDENT_IND} α) → {IDENT_IND} α"),
         ("CTOR_TYPE_PARAM", "({IDENT_IND} α → α) → {IDENT_IND} α"),
-
-        // AXIOM_DECL
-        ("AXIOM_DECL", "axiom {IDENT} : {TYPE}"),
-        ("AXIOM_DECL", "axiom {IDENT} : {PROP_TYPE}"),
-        ("AXIOM_DECL", "axiom {IDENT} {BINDERS} : {TYPE}"),
-        ("AXIOM_DECL", "axiom {IDENT} : ∀ {BINDER_SINGLE}, {PROP_TYPE}"),
 
         // ABBREV_DECL
         ("ABBREV_DECL", "abbrev {IDENT} := {TERM}"),
@@ -866,8 +859,8 @@ mod tests {
     fn rule_count_regression() {
         let count = rules_raw().len();
         assert_eq!(
-            count, 520,
-            "expected exactly 520 rules, got {count} — was a rule accidentally added or removed?"
+            count, 515,
+            "expected exactly 515 rules, got {count} — was a rule accidentally added or removed?"
         );
     }
 
