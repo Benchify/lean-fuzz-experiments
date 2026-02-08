@@ -1,7 +1,7 @@
 {
   "challenge_module": "Challenge",
   "solution_module": "Solution",
-  "theorem_names": ["fuzz_target"],
+  "theorem_names": ["soundness_check"],
   "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
   "enable_nanoda": false
 }
