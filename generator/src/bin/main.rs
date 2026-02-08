@@ -432,25 +432,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stats_clone = Arc::clone(&stats);
     let stats_for_signal = Arc::clone(&stats);
 
-    // Clone artifacts_dir for signal handler
-    let artifacts_dir_clone = artifacts_dir.clone();
-
-    // Register Ctrl+C handler to print stats before exit
-    ctrlc::set_handler(move || {
-        println!("\n\n[*] Ctrl+C received - saving reports...");
-        stats_for_signal.print_final_summary();
-
-        // Save summary report
-        match stats_for_signal.save_summary_report(&artifacts_dir_clone) {
-            Ok(path) => println!("\n📄 Summary saved to: {}", path.display()),
-            Err(e) => eprintln!("Failed to save summary: {}", e),
-        }
-
-        println!("\n📁 Results saved to:");
-        println!("   Solutions: generator/solutions/lake_*_comp_*_safe_*/");
-        println!("   Reports:   artifacts/generator-reports/");
-        std::process::exit(0);
-    }).expect("Error setting Ctrl+C handler");
+    // Note: Custom Ctrl+C handler conflicts with LibAFL's signal handling
+    // LibAFL will handle shutdown, we print stats in the cleanup section below
 
     // Clone values for move into closure
     let template_dir_clone = template_dir.clone();
