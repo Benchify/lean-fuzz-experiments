@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use clap::Parser;
-use generator::{create_context, generate_one, NautilusInput};
+use generator::{create_context, create_prefix_context, generate_one, NautilusInput};
 use libafl::generators::nautilus::NautilusGenerator;
 use libafl::generators::Generator;
 use libafl::state::NopState;
@@ -37,6 +37,10 @@ struct Cli {
     /// Timeout per `lake build` in seconds
     #[arg(long, default_value_t = 120)]
     timeout: u64,
+
+    /// Use prefix-only grammar (no proof terms/tactics, theorems use sorry)
+    #[arg(long, default_value_t = true)]
+    prefix_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +101,12 @@ fn main() {
     println!("[stress] failures: {}", failures_dir.display());
 
     // Phase 1: Generate all samples sequentially
-    println!("[stress] Generating {} samples...", cli.iterations);
-    let ctx = create_context(cli.depth);
+    println!("[stress] Generating {} samples... (prefix_only={})", cli.iterations, cli.prefix_only);
+    let ctx = if cli.prefix_only {
+        create_prefix_context(cli.depth)
+    } else {
+        create_context(cli.depth)
+    };
     let mut generator = NautilusGenerator::new(&ctx);
     let mut state: NopState<NautilusInput> = NopState::new();
 
