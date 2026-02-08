@@ -22,3 +22,4 @@ lean4/
 artifacts/stress_gen
 artifacts/generator-failures
 artifacts/golden-signals
+artifacts/pool
