@@ -391,8 +391,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Monitor: prints stats to stdout
     let monitor = SimpleMonitor::new(|s| println!("{s}"));
 
+    println!("[DEBUG] Setting up event manager...");
     // Event manager: multi-core with shared corpus via LLMP
     let (state_opt, mut mgr) = setup_restarting_mgr_std(monitor, 1337, EventConfig::AlwaysUnique)?;
+    println!("[DEBUG] Event manager ready");
 
     // Feedbacks
     let mut nautilus_feedback = NautilusFeedback::new(&ctx);
@@ -495,14 +497,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut generator = NautilusGenerator::new(&ctx);
 
     // Generate initial corpus (reduced to 2 seeds since lake+comparator is slow)
+    println!("[DEBUG] About to generate initial corpus...");
     println!("[*] Generating initial corpus...");
-    state.generate_initial_inputs_forced(
+    let gen_result = state.generate_initial_inputs_forced(
         &mut fuzzer,
         &mut executor,
         &mut generator,
         &mut mgr,
         2, // 2 initial seeds (lake+comparator is slow)
-    )?;
+    );
+    println!("[DEBUG] Initial corpus generation result: {:?}", gen_result.is_ok());
+    gen_result?;
     println!("[*] Initial corpus generated");
 
     // Mutators: weighted toward random mutation with some splice/recursion
