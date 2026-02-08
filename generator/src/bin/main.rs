@@ -289,8 +289,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_module("libafl_bolts::os::unix_shmem_server", log::LevelFilter::Off)
         .init();
 
-    // Note: Ctrl+C handling is done via catch_unwind in fuzz_loop
-    // Stats will be printed on any exit (normal or signal)
+    // Setup Ctrl+C handler that will run BEFORE we start fuzzing
+    // (LibAFL will override this, but we can use std::panic::set_hook as alternative)
 
     // Load .env file for COMPARATOR_PATH
     let _ = dotenvy::from_filename("../.env").or_else(|_| dotenvy::from_filename(".env"));
@@ -381,6 +381,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Statistics tracking (shared across all workers via Arc)
     let stats = Arc::new(VerifierStats::new());
     let stats_clone = Arc::clone(&stats);
+    let stats_for_signal = Arc::clone(&stats);
+
+    // Register Ctrl+C handler to print stats before exit
+    ctrlc::set_handler(move || {
+        println!("\n\n[*] Ctrl+C received - printing final statistics...");
+        stats_for_signal.print_final_summary();
+        println!("\n📁 Results saved to:");
+        println!("   generator/solutions/lake_*_comp_*_safe_*/");
+        std::process::exit(0);
+    }).expect("Error setting Ctrl+C handler");
 
     // Clone values for move into closure
     let template_dir_clone = template_dir.clone();

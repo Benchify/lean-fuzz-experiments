@@ -6,6 +6,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from rich.console import Console
+from rich.table import Table as RichTable
+
 from scaffold.models import DiagnosticRecord, ErrorCategory, Verdict
 
 
@@ -87,21 +90,41 @@ def generate_campaign_summary(log_path: Path) -> str:
             pct = (count / total) * 100
             lines.append(f"- **{category.value}:** {count:,} ({pct:.1f}%)")
 
-    # Suffix breakdown
+    # Suffix breakdown with rich table
     if suffix_stats:
         lines.extend([
             f"",
             f"## Golden Suffix Performance",
             f"",
-            f"| Suffix | Tests | Build Success | Avg Errors |",
-            f"|--------|-------|---------------|------------|",
         ])
+
+        # Create rich table for pretty formatting
+        console = Console(record=True, force_terminal=False)
+        table = RichTable(show_header=True, header_style="bold")
+        table.add_column("Suffix", style="cyan")
+        table.add_column("Tests", justify="right")
+        table.add_column("Build Success", justify="right")
+        table.add_column("Avg Errors", justify="right")
+
         for suffix_name, stats in sorted(suffix_stats.items()):
             success_rate = (stats['build_success'] / stats['count']) * 100 if stats['count'] > 0 else 0
             avg_errors = stats['total_errors'] / stats['count'] if stats['count'] > 0 else 0
-            lines.append(
-                f"| {suffix_name} | {stats['count']} | {success_rate:.0f}% | {avg_errors:.1f} |"
+
+            table.add_row(
+                suffix_name,
+                str(stats['count']),
+                f"{success_rate:.0f}%",
+                f"{avg_errors:.1f}",
             )
+
+        # Render table as text and add to markdown
+        with console.capture() as capture:
+            console.print(table)
+        lines.extend([
+            "```",
+            capture.get(),
+            "```",
+        ])
 
     return "\n".join(lines)
 
