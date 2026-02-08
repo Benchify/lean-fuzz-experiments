@@ -1,6 +1,6 @@
 name = "template"
 version = "0.1.0"
-defaultTargets = ["template"]
+defaultTargets = ["Template", "Challenge", "Solution"]
 
 [[lean_lib]]
 name = "Template"
@@ -10,7 +10,3 @@ name = "Challenge"
 
 [[lean_lib]]
 name = "Solution"
-
-[[lean_exe]]
-name = "template"
-root = "Main"
