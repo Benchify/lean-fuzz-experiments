@@ -108,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get comparator path from environment
     let comparator_path = std::env::var("COMPARATOR_PATH")
-        .unwrap_or_else(|_| "/Users/maxvonhippel/projects/research/comparator/.lake/build/bin/comparator".to_string());
+        .expect("COMPARATOR_PATH not set in .env - please configure it");
     let comparator_config_path = PathBuf::from(COMPARATOR_CONFIG).canonicalize()
         .unwrap_or_else(|_| PathBuf::from(COMPARATOR_CONFIG));
 
@@ -218,14 +218,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Generator for initial corpus seeding
     let mut generator = NautilusGenerator::new(&ctx);
 
-    // Generate initial corpus
+    // Generate initial corpus (reduced to 2 seeds since lake+comparator is slow)
     println!("[*] Generating initial corpus...");
     state.generate_initial_inputs_forced(
         &mut fuzzer,
         &mut executor,
         &mut generator,
         &mut mgr,
-        8, // 8 initial seeds
+        2, // 2 initial seeds (lake+comparator is slow)
     )?;
     println!("[*] Initial corpus generated");
 
