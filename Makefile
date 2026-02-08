@@ -18,14 +18,13 @@ SAFEVERIFY_REF ?= dbe482f
 run: build
 	@echo "[*] Starting $(JOBS) parallel fuzzer workers (depth=$(DEPTH))"
 	@echo "[*] Workers share corpus via LibAFL LLMP"
-	@echo "[*] Press Ctrl+C to stop all instances"
+	@echo "[*] Press Ctrl+C to stop (will save reports)"
 	@cd generator && \
 	for i in $$(seq 1 $(JOBS)); do \
 		echo "[*] Starting worker $$i/$(JOBS)..."; \
 		RUST_LOG=warn ./target/release/main --depth $(DEPTH) & \
 		sleep 0.2; \
 	done; \
-	trap 'echo "Stopping..."; kill $$(jobs -p) 2>/dev/null' INT; \
 	wait
 
 # Build the fuzzer

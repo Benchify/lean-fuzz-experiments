@@ -86,6 +86,52 @@ impl VerifierStats {
         self.print_table_internal(true);
     }
 
+    fn save_summary_report(&self, artifacts_dir: &Path) -> std::io::Result<PathBuf> {
+        use std::fmt::Write as FmtWrite;
+
+        let mut report = String::new();
+        let total: usize = self.counters.iter().map(|c| c.load(Ordering::Relaxed)).sum();
+        let runtime = self.start_time.elapsed();
+
+        writeln!(report, "# Fuzzer Campaign Summary\n").unwrap();
+        writeln!(report, "**Total executions:** {}", total).unwrap();
+        writeln!(report, "**Runtime:** {:.0?}\n", runtime).unwrap();
+        writeln!(report, "## Verifier Results\n").unwrap();
+
+        for (idx, counter) in self.counters.iter().enumerate() {
+            let count = counter.load(Ordering::Relaxed);
+            if count == 0 { continue; }
+
+            let lake = (idx >> 2) & 1 == 1;
+            let comp = (idx >> 1) & 1 == 1;
+            let safe = idx & 1 == 1;
+            let pct = (count as f64 / total as f64) * 100.0;
+
+            let note = match (lake, comp, safe) {
+                (true, true, true) => "🎯🎯🎯 ULTIMATE - SafeVerify bypass!",
+                (true, true, false) => "!!! GOLDEN - Kernel bug",
+                (true, false, true) => "?! DIVERGENCE",
+                _ => "",
+            };
+
+            writeln!(
+                report,
+                "- Lake={} Comp={} Safe={}: {} ({:.1}%) {}",
+                if lake {"PASS"} else {"FAIL"},
+                if comp {"PASS"} else {"FAIL"},
+                if safe {"PASS"} else {"FAIL"},
+                count, pct, note
+            ).unwrap();
+        }
+
+        writeln!(report, "\n## Result Locations\n").unwrap();
+        writeln!(report, "Results saved to: `generator/solutions/lake_*_comp_*_safe_*/`\n").unwrap();
+
+        let summary_path = artifacts_dir.join(format!("summary_{}.md", chrono::Utc::now().format("%Y%m%d_%H%M%S")));
+        fs::write(&summary_path, report)?;
+        Ok(summary_path)
+    }
+
     fn print_table_internal(&self, force: bool) {
         if !force {
             let mut last = self.last_print.lock().unwrap();
@@ -332,6 +378,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Output directories for 3D categorization: Lake × Comparator × SafeVerify
     let results_dir = PathBuf::from("solutions");
+    let artifacts_dir = PathBuf::from("../artifacts/generator-reports");
+    fs::create_dir_all(&artifacts_dir)?;
+
     ["pass", "fail"].iter()
         .flat_map(|l| ["pass", "fail"].iter().map(move |c| (l, c)))
         .flat_map(|(l, c)| ["pass", "fail"].iter().map(move |s| (l, c, s)))
@@ -383,12 +432,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stats_clone = Arc::clone(&stats);
     let stats_for_signal = Arc::clone(&stats);
 
+    // Clone artifacts_dir for signal handler
+    let artifacts_dir_clone = artifacts_dir.clone();
+
     // Register Ctrl+C handler to print stats before exit
     ctrlc::set_handler(move || {
-        println!("\n\n[*] Ctrl+C received - printing final statistics...");
+        println!("\n\n[*] Ctrl+C received - saving reports...");
         stats_for_signal.print_final_summary();
+
+        // Save summary report
+        match stats_for_signal.save_summary_report(&artifacts_dir_clone) {
+            Ok(path) => println!("\n📄 Summary saved to: {}", path.display()),
+            Err(e) => eprintln!("Failed to save summary: {}", e),
+        }
+
         println!("\n📁 Results saved to:");
-        println!("   generator/solutions/lake_*_comp_*_safe_*/");
+        println!("   Solutions: generator/solutions/lake_*_comp_*_safe_*/");
+        println!("   Reports:   artifacts/generator-reports/");
         std::process::exit(0);
     }).expect("Error setting Ctrl+C handler");
 
@@ -481,14 +541,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[*] Press Ctrl+C to stop (will save reports gracefully)");
     let fuzz_result = fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr);
 
-    // Print final summary (runs on normal exit or Ctrl+C)
+    // Print final summary and save report (runs on normal exit)
     println!("\n[*] Fuzzing campaign ended");
     stats.print_final_summary();
 
+    // Save summary report
+    match stats.save_summary_report(&artifacts_dir) {
+        Ok(path) => println!("\n📄 Summary saved to: {}", path.display()),
+        Err(e) => eprintln!("Failed to save summary: {}", e),
+    }
+
     // Show where to find results
     println!("\n📁 Results saved to:");
-    println!("   Generator: generator/solutions/lake_*_comp_*_safe_*/");
-    println!("   Scaffold:  artifacts/campaigns/<name>/ (if using scaffold)");
+    println!("   Solutions: generator/solutions/lake_*_comp_*_safe_*/");
+    println!("   Reports:   artifacts/generator-reports/");
     println!("\n💡 To analyze scaffold results:");
     println!("   cd scaffold && uv run scaffold report <session>.jsonl");
 
