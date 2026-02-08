@@ -9,9 +9,9 @@ DEPTH ?= 15
 # Lean version (must match across all tools for .olean compatibility)
 LEAN_VERSION ?= v4.27.0
 
-# Specific commits/tags for each tool at v4.27.0
-COMPARATOR_REF ?= v4.27.0
-LEAN4EXPORT_REF ?= 06aa52f
+# Specific commits for each tool at v4.27.0 (most recent before 4.28 bump)
+COMPARATOR_REF ?= 6c40ab4
+LEAN4EXPORT_REF ?= 56030ca
 SAFEVERIFY_REF ?= dbe482f
 
 # Default target: run parallel fuzzing
