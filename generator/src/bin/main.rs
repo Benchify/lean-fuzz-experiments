@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::fs;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use tempfile::TempDir;
@@ -33,6 +36,78 @@ use std::path::Path;
 const TEMPLATE_DIR: &str = "../template";
 /// File within the template project where generated code is injected.
 const TARGET_FILE: &str = "../template/Solution.lean";
+
+/// Statistics for verifier outcomes (thread-safe)
+#[derive(Debug)]
+struct VerifierStats {
+    counters: [AtomicUsize; 8],  // One for each (lake, comp, safe) combination
+    last_print: Mutex<Instant>,
+    start_time: Instant,
+}
+
+impl VerifierStats {
+    fn new() -> Self {
+        Self {
+            counters: Default::default(),
+            last_print: Mutex::new(Instant::now()),
+            start_time: Instant::now(),
+        }
+    }
+
+    fn record(&self, lake: bool, comp: bool, safe: bool) {
+        let idx = (lake as usize) << 2 | (comp as usize) << 1 | (safe as usize);
+        self.counters[idx].fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn print_table(&self) {
+        let mut last = self.last_print.lock().unwrap();
+        if last.elapsed() < Duration::from_secs(60) {
+            return;  // Don't print too frequently
+        }
+        *last = Instant::now();
+
+        let total: usize = self.counters.iter().map(|c| c.load(Ordering::Relaxed)).sum();
+        if total == 0 {
+            return;
+        }
+
+        let runtime = self.start_time.elapsed();
+        println!("\n╔═══════════════════════════════════════════════════════╗");
+        println!("║ VERIFIER STATS - {} executions ({:.0?})",
+            total, runtime);
+        println!("╠═══════╤════════════╤═══════════╤═══════╤═══════╤═══════╣");
+        println!("║ Lake  │ Comparator │ SafeVerify │ Count │   %   │ Note  ║");
+        println!("╠═══════╪════════════╪═══════════╪═══════╪═══════╪═══════╣");
+
+        for (idx, counter) in self.counters.iter().enumerate() {
+            let count = counter.load(Ordering::Relaxed);
+            if count == 0 { continue; }  // Skip zeros
+
+            let lake = (idx >> 2) & 1 == 1;
+            let comp = (idx >> 1) & 1 == 1;
+            let safe = idx & 1 == 1;
+            let pct = (count as f64 / total as f64) * 100.0;
+
+            let (lake_s, comp_s, safe_s) = (
+                if lake { "PASS" } else { "FAIL" },
+                if comp { "PASS" } else { "FAIL" },
+                if safe { "PASS" } else { "FAIL" },
+            );
+
+            let note = match (lake, comp, safe) {
+                (true, true, true) => "🎯🎯🎯 ULTIMATE",
+                (true, true, false) => "!!! GOLDEN",
+                (true, false, true) => "?! DIVERGE",
+                _ => "",
+            };
+
+            println!("║ {:5} │ {:10} │ {:10} │ {:5} │ {:5.1}% │ {:9} ║",
+                lake_s, comp_s, safe_s, count, pct, note);
+        }
+
+        println!("╚═══════╧════════════╧═══════════╧═══════╧═══════╧═══════╝\n");
+    }
+}
 
 /// Setup isolated temp environment for a test case
 fn setup_temp_environment(
@@ -108,7 +183,11 @@ fn categorize_and_save(
     comparator: bool,
     safeverify: bool,
     code: &str,
+    stats: &VerifierStats,
 ) -> bool {
+    // Record statistics
+    stats.record(lake, comparator, safeverify);
+    stats.print_table();
     let timestamp = current_nanos();
     let category = format!(
         "solutions/lake_{}_comp_{}_safe_{}",
@@ -200,8 +279,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[*] Target file:  {}", TARGET_FILE);
     println!("[*] Tree depth:   {}", args.depth);
 
-    // Build the Nautilus grammar context
-    let ctx = create_context(args.depth);
+    // Build the Nautilus grammar context (wrap in Arc for sharing)
+    let ctx = Arc::new(create_context(args.depth));
     println!(
         "[*] Grammar loaded: {} rules",
         generator::grammar::lean4_rules().len()
@@ -250,20 +329,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fuzzer
     let mut fuzzer = StdFuzzer::new(scheduler, nautilus_feedback, crash_feedback);
 
-    // Get verifier paths from environment
+    // Get verifier paths from environment (clone for move into closure)
     let comparator_path = std::env::var("COMPARATOR_PATH")
         .expect("COMPARATOR_PATH not set in .env - please configure it");
     let safeverify_path = std::env::var("SAFEVERIFY_PATH")
         .expect("SAFEVERIFY_PATH not set in .env - please configure it");
 
+    // Statistics tracking (shared across all workers via Arc)
+    let stats = Arc::new(VerifierStats::new());
+    let stats_clone = Arc::clone(&stats);
+
+    // Clone values for move into closure
+    let template_dir_clone = template_dir.clone();
+    let comparator_path_clone = comparator_path.clone();
+    let safeverify_path_clone = safeverify_path.clone();
+    let ctx_clone = Arc::clone(&ctx);
+
     // Harness: unparse → write → lake build → comparator → safeverify → categorize
-    let mut harness = |input: &NautilusInput| -> ExitKind {
-        let prefix = generate_one(&ctx, input);
+    let mut harness = move |input: &NautilusInput| -> ExitKind {
+        let prefix = generate_one(&ctx_clone, input);
         let golden_suffix = "\n\n-- GOLDEN CHECK\ntheorem soundness_check : False := by\n  simp_all\n  omega\n  decide\n";
         let code = format!("{}{}", prefix, golden_suffix);
 
         // Setup isolated temp environment
-        let (_temp_dir, temp_template) = match setup_temp_environment(&template_dir, &code) {
+        let (_temp_dir, temp_template) = match setup_temp_environment(&template_dir_clone, &code) {
             Ok(env) => env,
             Err(e) => {
                 log::warn!("{}", e);
@@ -273,15 +362,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Run verifiers
         let lake_success = run_lake_build(&temp_template);
-        let comparator_success = run_comparator(&temp_template, &comparator_path);
+        let comparator_success = run_comparator(&temp_template, &comparator_path_clone);
         let safeverify_success = if lake_success {
-            run_safeverify(&temp_template, &safeverify_path)
+            run_safeverify(&temp_template, &safeverify_path_clone)
         } else {
             false
         };
 
         // Categorize and save
-        let is_crash = categorize_and_save(lake_success, comparator_success, safeverify_success, &code);
+        let is_crash = categorize_and_save(lake_success, comparator_success, safeverify_success, &code, &stats_clone);
 
         if is_crash {
             ExitKind::Crash
