@@ -88,24 +88,18 @@ fn run_comparator(project_dir: &Path, comparator_path: &str) -> bool {
 
 /// Run SafeVerify on compiled .olean files and return success status
 fn run_safeverify(project_dir: &Path, safeverify_path: &str) -> bool {
-    let challenge_olean = project_dir.join(".lake/build/lib/Challenge.olean");
-    let solution_olean = project_dir.join(".lake/build/lib/Solution.olean");
+    let olean_dir = project_dir.join(".lake/build/lib");
+    let challenge = olean_dir.join("Challenge.olean");
+    let solution = olean_dir.join("Solution.olean");
 
-    if !challenge_olean.exists() || !solution_olean.exists() {
-        return false;
-    }
-
-    Command::new("lake")
-        .arg("env")
-        .arg(safeverify_path)
-        .arg(challenge_olean.display().to_string())
-        .arg(solution_olean.display().to_string())
-        .current_dir(project_dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    [&challenge, &solution].iter().all(|p| p.exists())
+        && Command::new("lake")
+            .args(["env", safeverify_path, &challenge.display().to_string(), &solution.display().to_string()])
+            .current_dir(project_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .map_or(false, |out| out.status.success())
 }
 
 /// Categorize result, save to appropriate directory, and return if it's a crash
@@ -215,17 +209,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Output directories for 3D categorization: Lake × Comparator × SafeVerify
     let results_dir = PathBuf::from("solutions");
-    fs::create_dir_all(&results_dir)?;
-
-    // Create all 8 possible outcome directories
-    for lake in ["pass", "fail"] {
-        for comp in ["pass", "fail"] {
-            for safe in ["pass", "fail"] {
-                let dir = results_dir.join(format!("lake_{}_comp_{}_safe_{}", lake, comp, safe));
-                fs::create_dir_all(&dir)?;
-            }
-        }
-    }
+    ["pass", "fail"].iter()
+        .flat_map(|l| ["pass", "fail"].iter().map(move |c| (l, c)))
+        .flat_map(|(l, c)| ["pass", "fail"].iter().map(move |s| (l, c, s)))
+        .try_for_each(|(lake, comp, safe)| {
+            fs::create_dir_all(results_dir.join(format!("lake_{}_comp_{}_safe_{}", lake, comp, safe)))
+        })?;
 
     // Monitor: prints stats to stdout
     let monitor = SimpleMonitor::new(|s| println!("{s}"));
