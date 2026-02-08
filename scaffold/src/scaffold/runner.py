@@ -332,7 +332,6 @@ def fuzz(
     stats = {"golden": 0, "false_positive": 0, "build_failed": 0, "timeout": 0}
     tested_count = 0
     novel_errors: set[str] = set()  # Track unknown error patterns
-    longest_surviving = {"prefix": "", "stage": 0, "hash": ""}  # Track furthest prefix
 
     def _test_one(idx: int, prefix: str) -> tuple[int, PrefixResult]:
         return idx, execute_prefix(prefix, pool, timeout=timeout)
@@ -462,14 +461,14 @@ def fuzz(
 
     # Show where to find results
     typer.echo(f"\n{'='*60}")
-    typer.echo(f"📁 CAMPAIGN RESULTS")
+    typer.echo("📁 CAMPAIGN RESULTS")
     typer.echo(f"{'='*60}")
 
     if campaign_dir:
         typer.echo(f"\n📂 Campaign directory: {campaign_dir}")
-        typer.echo(f"   ├── summary.md       (overview and statistics)")
-        typer.echo(f"   ├── near-misses.md   (top Tier 0 prefixes)")
-        typer.echo(f"   ├── corpus/tier-*/   (tiered prefix corpus)")
+        typer.echo("   ├── summary.md       (overview and statistics)")
+        typer.echo("   ├── near-misses.md   (top Tier 0 prefixes)")
+        typer.echo("   ├── corpus/tier-*/   (tiered prefix corpus)")
         if checkpoint_count > 0:
             typer.echo(f"   ├── checkpoints/     ({checkpoint_count} saved)")
         if diag_logger:

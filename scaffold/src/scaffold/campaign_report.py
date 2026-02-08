@@ -2,7 +2,7 @@
 
 import json
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,21 +46,21 @@ def generate_campaign_summary(log_path: Path) -> str:
 
     # Build summary
     lines = [
-        f"# Campaign Summary",
-        f"",
+        "# Campaign Summary",
+        "",
         f"**Session:** `{records[0].session_id}`",
         f"**Started:** {start_time.strftime('%Y-%m-%d %H:%M:%S UTC')}",
         f"**Ended:** {end_time.strftime('%Y-%m-%d %H:%M:%S UTC')}",
         f"**Duration:** {_format_duration(duration)}",
-        f"",
-        f"## Overview",
-        f"",
+        "",
+        "## Overview",
+        "",
         f"- **Total executions:** {total:,}",
         f"- **Unique prefixes:** {unique_prefixes:,}",
         f"- **Executions per minute:** {total / max(duration.total_seconds() / 60, 1):.1f}",
-        f"",
-        f"## Verdict Distribution",
-        f"",
+        "",
+        "## Verdict Distribution",
+        "",
     ]
 
     for verdict in [Verdict.GOLDEN, Verdict.BUILD_FAILED, Verdict.TIMEOUT, Verdict.FALSE_POSITIVE]:
@@ -72,19 +72,19 @@ def generate_campaign_summary(log_path: Path) -> str:
 
     if verdict_counts[Verdict.GOLDEN] > 0:
         lines.extend([
-            f"",
-            f"### 🎯 Golden Signals!",
-            f"",
+            "",
+            "### 🎯 Golden Signals!",
+            "",
             f"Found {verdict_counts[Verdict.GOLDEN]} potential soundness bug(s)!",
-            f"Check `artifacts/golden-signals/` for details.",
+            "Check `artifacts/golden-signals/` for details.",
         ])
 
     # Error categories (top 10)
     if error_counts:
         lines.extend([
-            f"",
-            f"## Error Categories (Top 10)",
-            f"",
+            "",
+            "## Error Categories (Top 10)",
+            "",
         ])
         for category, count in error_counts.most_common(10):
             pct = (count / total) * 100
@@ -93,9 +93,9 @@ def generate_campaign_summary(log_path: Path) -> str:
     # Suffix breakdown with rich table
     if suffix_stats:
         lines.extend([
-            f"",
-            f"## Golden Suffix Performance",
-            f"",
+            "",
+            "## Golden Suffix Performance",
+            "",
         ])
 
         # Create rich table for pretty formatting
