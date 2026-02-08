@@ -7,6 +7,7 @@ build failure.
 
 import re
 
+from scaffold.diagnostics import categorize_stderr, summary_categories
 from scaffold.models import OracleResult, Verdict
 
 # Patterns that indicate the prefix is "cheating" rather than exploiting a real bug.
@@ -77,6 +78,7 @@ def judge(
     exit_code: int,
     output: str,
     timed_out: bool = False,
+    stderr: str = "",
 ) -> OracleResult:
     """Judge a single prefix+suffix execution.
 
@@ -86,6 +88,7 @@ def judge(
         exit_code: Return code from `lake build`.
         output: Combined stdout+stderr from `lake build`.
         timed_out: Whether the build timed out.
+        stderr: Raw stderr from `lake build` (for diagnostics).
 
     Returns:
         OracleResult with the verdict.
@@ -99,11 +102,20 @@ def judge(
         )
 
     if exit_code != 0:
+        diagnostics = categorize_stderr(stderr)
+        categories = summary_categories(diagnostics)
+        reason = (
+            f"Build failed: {', '.join(c.value for c in categories)}"
+            if categories
+            else "Build failed."
+        )
         return OracleResult(
             suffix_name=suffix_name,
             verdict=Verdict.BUILD_FAILED,
             exit_code=exit_code,
-            reason="Build failed.",
+            reason=reason,
+            diagnostics=diagnostics,
+            raw_stderr=stderr,
         )
 
     # Build succeeded — now check if it's genuine.

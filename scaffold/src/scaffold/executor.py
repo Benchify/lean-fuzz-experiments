@@ -145,6 +145,7 @@ def execute_prefix(
                 exit_code=exit_code,
                 output=output,
                 timed_out=timed_out,
+                stderr=stderr,
             )
             results.append(result)
 
