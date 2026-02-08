@@ -36,6 +36,44 @@ DEFAULT_POOL_DIR = MONOREPO / "artifacts" / "pool"
 GOLDEN_SIGNALS_DIR = MONOREPO / "artifacts" / "golden-signals"
 
 
+def _generate_near_misses(tier_0_prefixes: list[tuple[str, str]]) -> str:
+    """Generate a near-misses report from Tier 0 prefixes.
+
+    Args:
+        tier_0_prefixes: List of (hash, prefix_code) tuples
+
+    Returns:
+        Markdown report of most interesting near-misses
+    """
+    lines = [
+        "# Near-Misses Report",
+        "",
+        "Tier 0 prefixes that compiled successfully but failed to prove False.",
+        "These are the CLOSEST to finding a soundness bug!",
+        "",
+        f"Total Tier 0 prefixes: {len(tier_0_prefixes)}",
+        "",
+    ]
+
+    for i, (prefix_hash, prefix_code) in enumerate(tier_0_prefixes, 1):
+        lines.extend([
+            f"## Near-Miss #{i} - `{prefix_hash}`",
+            "",
+            "```lean",
+            prefix_code.strip(),
+            "```",
+            "",
+            "**Why interesting:** Prefix compiled cleanly. Golden suffix failed with",
+            "'proof not found' - meaning the environment is valid but automation",
+            "couldn't find a path to False. One mutation away from a potential bug!",
+            "",
+            "---",
+            "",
+        ])
+
+    return "\n".join(lines)
+
+
 def _save_golden(prefix: str, result: PrefixResult) -> Path:
     """Persist a golden signal to disk."""
     GOLDEN_SIGNALS_DIR.mkdir(parents=True, exist_ok=True)
@@ -152,6 +190,7 @@ def fuzz(
     timeout: int = typer.Option(120, help="Build timeout per suffix (seconds)."),
     diagnostics: bool = typer.Option(True, help="Enable diagnostic logging."),
     corpus: bool = typer.Option(True, help="Save tiered corpus for reuse."),
+    campaign: str | None = typer.Option(None, help="Campaign name for organized artifacts."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Generate prefixes via gen-sample and test against golden suffixes."""
@@ -164,10 +203,20 @@ def fuzz(
     pool.initialize()
     typer.echo(f"Pool ready: {pool_size} slots at {pool_dir}")
 
-    diag_logger = DiagnosticLogger() if diagnostics else None
+    # Setup campaign directory if named
+    if campaign:
+        campaign_dir = MONOREPO / "artifacts" / "campaigns" / campaign
+        campaign_dir.mkdir(parents=True, exist_ok=True)
+        session_id = campaign
+    else:
+        campaign_dir = None
+        session_id = None
+
+    diag_logger = DiagnosticLogger(session_id=session_id) if diagnostics else None
     error_counter: Counter[ErrorCategory] = Counter()
-    corpus_dir = MONOREPO / "artifacts" / "corpus" if corpus else None
+    corpus_dir = (campaign_dir / "corpus" if campaign_dir else MONOREPO / "artifacts" / "corpus") if corpus else None
     tier_counts: Counter[str] = Counter()
+    tier_0_prefixes: list[tuple[str, str]] = []  # (prefix_hash, prefix_code) for near-misses
 
     # Generate all prefixes upfront.
     typer.echo(f"Generating {iterations} prefixes (depth={depth})...")
@@ -210,6 +259,9 @@ def fuzz(
                     tier_counts[tier.value] += 1
                     if tier.value != "discard":
                         save_to_tier(result.prefix, tier, prefix_hash, corpus_dir)
+                    # Track Tier 0 for near-misses report
+                    if tier.value == "tier-0":
+                        tier_0_prefixes.append((prefix_hash, result.prefix))
 
             if result.has_golden:
                 stats["golden"] += 1
@@ -244,14 +296,28 @@ def fuzz(
         for cat, count in error_counter.most_common():
             typer.echo(f"  {cat.value:25s} {count}")
 
+    # Generate campaign artifacts
     if diag_logger:
         typer.echo(f"\nDiagnostics logged to {diag_logger.log_path}")
 
         # Generate and save campaign summary
         summary = generate_campaign_summary(diag_logger.log_path)
-        summary_path = diag_logger.log_path.with_suffix('.md')
+        if campaign_dir:
+            summary_path = campaign_dir / "summary.md"
+        else:
+            summary_path = diag_logger.log_path.with_suffix('.md')
         summary_path.write_text(summary)
         typer.echo(f"Campaign summary saved to {summary_path}")
+
+    # Generate near-misses report (Tier 0 prefixes that almost worked)
+    if tier_0_prefixes:
+        near_misses = _generate_near_misses(tier_0_prefixes[:10])  # Top 10
+        if campaign_dir:
+            near_misses_path = campaign_dir / "near-misses.md"
+        else:
+            near_misses_path = MONOREPO / "artifacts" / "near-misses.md"
+        near_misses_path.write_text(near_misses)
+        typer.echo(f"Near-misses report saved to {near_misses_path}")
 
     # Print tier distribution
     if tier_counts:
@@ -263,6 +329,9 @@ def fuzz(
                 typer.echo(f"  {tier_name:10s} {count:4d} {icon}")
         if corpus_dir:
             typer.echo(f"\nTiered corpus saved to {corpus_dir}")
+
+    if campaign_dir:
+        typer.echo(f"\n📁 Campaign artifacts in {campaign_dir}")
 
 
 @app.command()
