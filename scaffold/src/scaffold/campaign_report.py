@@ -63,7 +63,12 @@ def generate_campaign_summary(log_path: Path) -> str:
         "",
     ]
 
-    for verdict in [Verdict.GOLDEN, Verdict.BUILD_FAILED, Verdict.TIMEOUT, Verdict.FALSE_POSITIVE]:
+    for verdict in [
+        Verdict.GOLDEN,
+        Verdict.BUILD_FAILED,
+        Verdict.TIMEOUT,
+        Verdict.FALSE_POSITIVE,
+    ]:
         count = verdict_counts[verdict]
         if count > 0:
             pct = (count / total) * 100
@@ -71,32 +76,38 @@ def generate_campaign_summary(log_path: Path) -> str:
             lines.append(f"- **{verdict.value}:** {count:,} ({pct:.1f}%) {icon}")
 
     if verdict_counts[Verdict.GOLDEN] > 0:
-        lines.extend([
-            "",
-            "### 🎯 Golden Signals!",
-            "",
-            f"Found {verdict_counts[Verdict.GOLDEN]} potential soundness bug(s)!",
-            "Check `artifacts/golden-signals/` for details.",
-        ])
+        lines.extend(
+            [
+                "",
+                "### 🎯 Golden Signals!",
+                "",
+                f"Found {verdict_counts[Verdict.GOLDEN]} potential soundness bug(s)!",
+                "Check `artifacts/golden-signals/` for details.",
+            ]
+        )
 
     # Error categories (top 10)
     if error_counts:
-        lines.extend([
-            "",
-            "## Error Categories (Top 10)",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "## Error Categories (Top 10)",
+                "",
+            ]
+        )
         for category, count in error_counts.most_common(10):
             pct = (count / total) * 100
             lines.append(f"- **{category.value}:** {count:,} ({pct:.1f}%)")
 
     # Suffix breakdown with rich table
     if suffix_stats:
-        lines.extend([
-            "",
-            "## Golden Suffix Performance",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "## Golden Suffix Performance",
+                "",
+            ]
+        )
 
         # Create rich table for pretty formatting
         console = Console(record=True, force_terminal=False)
@@ -107,12 +118,18 @@ def generate_campaign_summary(log_path: Path) -> str:
         table.add_column("Avg Errors", justify="right")
 
         for suffix_name, stats in sorted(suffix_stats.items()):
-            success_rate = (stats['build_success'] / stats['count']) * 100 if stats['count'] > 0 else 0
-            avg_errors = stats['total_errors'] / stats['count'] if stats['count'] > 0 else 0
+            success_rate = (
+                (stats["build_success"] / stats["count"]) * 100
+                if stats["count"] > 0
+                else 0
+            )
+            avg_errors = (
+                stats["total_errors"] / stats["count"] if stats["count"] > 0 else 0
+            )
 
             table.add_row(
                 suffix_name,
-                str(stats['count']),
+                str(stats["count"]),
                 f"{success_rate:.0f}%",
                 f"{avg_errors:.1f}",
             )
@@ -120,11 +137,13 @@ def generate_campaign_summary(log_path: Path) -> str:
         # Render table as text and add to markdown
         with console.capture() as capture:
             console.print(table)
-        lines.extend([
-            "```",
-            capture.get(),
-            "```",
-        ])
+        lines.extend(
+            [
+                "```",
+                capture.get(),
+                "```",
+            ]
+        )
 
     return "\n".join(lines)
 
@@ -142,18 +161,20 @@ def _load_records(log_path: Path) -> list[DiagnosticRecord]:
 
 def _analyze_suffixes(records: list[DiagnosticRecord]) -> dict[str, dict[str, Any]]:
     """Analyze per-suffix statistics."""
-    suffix_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {
-        'count': 0,
-        'build_success': 0,
-        'total_errors': 0,
-    })
+    suffix_stats: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "count": 0,
+            "build_success": 0,
+            "total_errors": 0,
+        }
+    )
 
     for record in records:
         suffix = record.suffix_name
-        suffix_stats[suffix]['count'] += 1
+        suffix_stats[suffix]["count"] += 1
         if record.verdict != Verdict.BUILD_FAILED:
-            suffix_stats[suffix]['build_success'] += 1
-        suffix_stats[suffix]['total_errors'] += len(record.error_categories)
+            suffix_stats[suffix]["build_success"] += 1
+        suffix_stats[suffix]["total_errors"] += len(record.error_categories)
 
     return dict(suffix_stats)
 

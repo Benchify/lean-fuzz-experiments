@@ -69,7 +69,9 @@ def classify_tier(record: DiagnosticRecord) -> CorpusTier:
     return CorpusTier.DISCARD
 
 
-def save_to_tier(prefix: str, tier: CorpusTier, prefix_hash: str, corpus_dir: Path) -> Path:
+def save_to_tier(
+    prefix: str, tier: CorpusTier, prefix_hash: str, corpus_dir: Path
+) -> Path:
     """Save a prefix to its tier directory.
 
     Args:
