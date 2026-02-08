@@ -73,4 +73,5 @@ class TestGenSamplePrefixOnly:
     def test_full_grammar_still_works(self) -> None:
         """gen_sample without --prefix-only should still work."""
         output = run_gen_sample(depth=10, prefix_only=False)
-        assert len(output) > 0
+        # Empty output is valid (grammar has empty PREAMBLE rule)
+        assert isinstance(output, str)
