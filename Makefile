@@ -9,12 +9,14 @@ DEPTH ?= 15
 # Default target: run parallel fuzzing
 run: build
 	@echo "[*] Starting $(JOBS) parallel fuzzer instances (depth=$(DEPTH))"
-	@echo "[*] Press Ctrl+C to stop"
+	@echo "[*] Press Ctrl+C to stop all instances"
 	@cd generator && \
 	for i in $$(seq 1 $(JOBS)); do \
-		RUST_LOG=warn cargo +nightly run --release --bin main -- --depth $(DEPTH) & \
+		echo "[*] Starting instance $$i/$(JOBS)..."; \
+		RUST_LOG=warn ./target/release/main --depth $(DEPTH) & \
+		sleep 0.1; \
 	done; \
-	trap 'kill $$(jobs -p) 2>/dev/null' EXIT; \
+	trap 'echo "Stopping..."; kill $$(jobs -p) 2>/dev/null' INT; \
 	wait
 
 # Build the fuzzer

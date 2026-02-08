@@ -32,7 +32,6 @@ use generator::{create_context, generate_one};
 const TEMPLATE_DIR: &str = "../template";
 /// File within the template project where generated code is injected.
 const TARGET_FILE: &str = "../template/Solution.lean";
-const COMPARATOR_CONFIG: &str = "../template/comparator_config.json";
 
 /// Lean 4 Grammar Fuzzer (Nautilus)
 #[derive(Parser, Debug)]
