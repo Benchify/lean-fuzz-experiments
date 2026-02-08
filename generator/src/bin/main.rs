@@ -9,8 +9,8 @@ use clap::Parser;
 use comfy_table::{Table, Cell, Color, Attribute, presets::UTF8_FULL};
 use tempfile::TempDir;
 use fs_extra::dir::CopyOptions;
-use libafl::corpus::OnDiskCorpus;
-use libafl::events::{EventConfig, llmp::setup_restarting_mgr_std};
+use libafl::corpus::{InMemoryCorpus, OnDiskCorpus};
+use libafl::events::SimpleEventManager;
 use libafl::executors::{ExitKind, InProcessExecutor};
 use libafl::feedbacks::nautilus::{NautilusChunksMetadata, NautilusFeedback};
 use libafl::feedbacks::CrashFeedback;
@@ -391,26 +391,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Monitor: prints stats to stdout
     let monitor = SimpleMonitor::new(|s| println!("{s}"));
 
-    println!("[DEBUG] Setting up event manager...");
-    // Event manager: multi-core with shared corpus via LLMP
-    let (state_opt, mut mgr) = setup_restarting_mgr_std(monitor, 1337, EventConfig::AlwaysUnique)?;
-    println!("[DEBUG] Event manager ready");
+    // Simple event manager (LLMP multi-process was blocking, see issue #24)
+    let mut mgr = SimpleEventManager::new(monitor);
 
     // Feedbacks
     let mut nautilus_feedback = NautilusFeedback::new(&ctx);
     let mut crash_feedback = CrashFeedback::new();
 
-    // State - Use ONLY disk corpus (no in-memory) to prevent RAM exhaustion
+    // InMemoryCorpus for main corpus (required by LibAFL), OnDiskCorpus for solutions
     let golden_dir = results_dir.join("lake_pass_comp_pass_safe_pass");
-    let mut state = state_opt.unwrap_or_else(|| {
-        StdState::new(
-            StdRand::with_seed(current_nanos()),
-            OnDiskCorpus::new(&golden_dir).expect("Failed to create corpus dir"),
-            OnDiskCorpus::new(&golden_dir).expect("Failed to create corpus dir"),
-            &mut nautilus_feedback,
-            &mut crash_feedback,
-        ).expect("Failed to create state")
-    });
+    let mut state = StdState::new(
+        StdRand::with_seed(current_nanos()),
+        InMemoryCorpus::<NautilusInput>::new(),
+        OnDiskCorpus::new(&golden_dir)?,
+        &mut nautilus_feedback,
+        &mut crash_feedback,
+    )?;
 
     // Register Nautilus chunk metadata (required by NautilusFeedback and splice mutator)
     if !state.has_metadata::<NautilusChunksMetadata>() {
@@ -432,10 +428,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Statistics tracking (shared across all workers via Arc)
     let stats = Arc::new(VerifierStats::new());
     let stats_clone = Arc::clone(&stats);
-    let stats_for_signal = Arc::clone(&stats);
-
-    // Note: Custom Ctrl+C handler conflicts with LibAFL's signal handling
-    // LibAFL will handle shutdown, we print stats in the cleanup section below
 
     // Clone values for move into closure
     let template_dir_clone = template_dir.clone();
@@ -497,17 +489,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut generator = NautilusGenerator::new(&ctx);
 
     // Generate initial corpus (reduced to 2 seeds since lake+comparator is slow)
-    println!("[DEBUG] About to generate initial corpus...");
     println!("[*] Generating initial corpus...");
-    let gen_result = state.generate_initial_inputs_forced(
+    state.generate_initial_inputs_forced(
         &mut fuzzer,
         &mut executor,
         &mut generator,
         &mut mgr,
-        2, // 2 initial seeds (lake+comparator is slow)
-    );
-    println!("[DEBUG] Initial corpus generation result: {:?}", gen_result.is_ok());
-    gen_result?;
+        2,
+    )?;
     println!("[*] Initial corpus generated");
 
     // Mutators: weighted toward random mutation with some splice/recursion
