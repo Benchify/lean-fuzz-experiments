@@ -1,1 +1,1 @@
-#check default
+set_option autoImplicit true

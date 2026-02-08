@@ -1,3 +1,4 @@
+import Lean
+import Lean.Meta
 
-
-#check default
+set_option autoImplicit true
