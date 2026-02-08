@@ -71,7 +71,7 @@ deps:
 	@echo "[*] Building safeverify at $(SAFEVERIFY_REF) ($(LEAN_VERSION))..."
 	@cd ../safeverify && \
 		git fetch && git checkout $(SAFEVERIFY_REF) && \
-		lake build
+		lake build safe_verify:exe
 	@# Clone lean4 source (optional)
 	@if [ ! -d "lean4" ]; then \
 		echo "[*] Cloning lean4 source..."; \
