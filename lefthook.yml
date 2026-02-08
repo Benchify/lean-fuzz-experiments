@@ -1,0 +1,33 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: ruff-check
+      root: scaffold/
+      run: uv run ruff check
+
+    - name: ruff-format
+      root: scaffold/
+      run: uv run ruff format --check
+
+    - name: ty-check
+      root: scaffold/
+      run: uv run ty check
+
+    - name: cargo-build
+      root: generator/
+      run: cargo build
+
+    - name: cargo-test
+      root: generator/
+      run: cargo test
+
+pre-push:
+  parallel: true
+  jobs:
+    - name: pytest
+      root: scaffold/
+      run: uv run pytest
+
+    - name: lake-build
+      root: template/
+      run: lake build
