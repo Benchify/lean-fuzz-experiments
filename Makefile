@@ -7,7 +7,12 @@ DEPTH ?= 15
 .PHONY: run build test clean help deps
 
 # Lean version (must match across all tools for .olean compatibility)
-LEAN_VERSION ?= v4.28.0-rc1
+LEAN_VERSION ?= v4.27.0
+
+# Specific commits/tags for each tool at v4.27.0
+COMPARATOR_REF ?= v4.27.0
+LEAN4EXPORT_REF ?= 06aa52f
+SAFEVERIFY_REF ?= dbe482f
 
 # Default target: run parallel fuzzing
 run: build
@@ -45,29 +50,27 @@ deps:
 		echo "[*] Cloning lean4export..."; \
 		cd .. && git clone https://github.com/leanprover/lean4export.git; \
 	fi
-	@echo "[*] Building lean4export with $(LEAN_VERSION)..."
+	@echo "[*] Building lean4export at $(LEAN4EXPORT_REF) ($(LEAN_VERSION))..."
 	@cd ../lean4export && \
-		echo "leanprover/lean4:$(LEAN_VERSION)" > lean-toolchain && \
+		git fetch && git checkout $(LEAN4EXPORT_REF) && \
 		lake build
-	@# Clone and build comparator (has 4.28.0-rc1 branch)
+	@# Clone and build comparator
 	@if [ ! -d "../comparator" ]; then \
 		echo "[*] Cloning comparator..."; \
 		cd .. && git clone https://github.com/leanprover/comparator.git; \
 	fi
-	@echo "[*] Building comparator with $(LEAN_VERSION)..."
+	@echo "[*] Building comparator at $(COMPARATOR_REF) ($(LEAN_VERSION))..."
 	@cd ../comparator && \
-		git fetch && git checkout main && git pull && \
-		echo "leanprover/lean4:$(LEAN_VERSION)" > lean-toolchain && \
+		git fetch && git checkout $(COMPARATOR_REF) && \
 		lake build
-	@# Clone and build safeverify (currently 4.27.0, will override to match)
+	@# Clone and build safeverify
 	@if [ ! -d "../safeverify" ]; then \
 		echo "[*] Cloning safeverify..."; \
 		cd .. && git clone https://github.com/gasstationmanager/safeverify.git; \
 	fi
-	@echo "[*] Building safeverify with $(LEAN_VERSION)..."
+	@echo "[*] Building safeverify at $(SAFEVERIFY_REF) ($(LEAN_VERSION))..."
 	@cd ../safeverify && \
-		git fetch && git checkout main && git pull && \
-		echo "leanprover/lean4:$(LEAN_VERSION)" > lean-toolchain && \
+		git fetch && git checkout $(SAFEVERIFY_REF) && \
 		lake build
 	@# Clone lean4 source (optional)
 	@if [ ! -d "lean4" ]; then \
