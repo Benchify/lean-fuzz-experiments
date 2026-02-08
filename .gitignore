@@ -11,8 +11,12 @@ htmlcov
 .venv/
 .lake/
 target/
+generator/workdir/
+generator/solutions/
 
 .env
 
 # just for data to agentically search over
 lean4/
+
+artifacts/stress_gen
