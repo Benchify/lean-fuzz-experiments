@@ -17,6 +17,7 @@ from pathlib import Path
 import typer
 
 from scaffold.campaign_report import generate_campaign_summary
+from scaffold.corpus_tier import classify_tier, save_to_tier
 from scaffold.diagnostic_log import DiagnosticLogger
 from scaffold.diagnostics import summary_categories
 from scaffold.executor import (
@@ -150,6 +151,7 @@ def fuzz(
     pool_dir: Path = typer.Option(DEFAULT_POOL_DIR, help="Pool directory."),
     timeout: int = typer.Option(120, help="Build timeout per suffix (seconds)."),
     diagnostics: bool = typer.Option(True, help="Enable diagnostic logging."),
+    corpus: bool = typer.Option(True, help="Save tiered corpus for reuse."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Generate prefixes via gen-sample and test against golden suffixes."""
@@ -164,6 +166,8 @@ def fuzz(
 
     diag_logger = DiagnosticLogger() if diagnostics else None
     error_counter: Counter[ErrorCategory] = Counter()
+    corpus_dir = MONOREPO / "artifacts" / "corpus" if corpus else None
+    tier_counts: Counter[str] = Counter()
 
     # Generate all prefixes upfront.
     typer.echo(f"Generating {iterations} prefixes (depth={depth})...")
@@ -197,6 +201,15 @@ def fuzz(
                     diag_logger.log(result.prefix, r)
                 for cat in summary_categories(r.diagnostics):
                     error_counter[cat] += 1
+
+                # Classify into corpus tier (use first result for classification)
+                if corpus_dir and r == result.results[0]:
+                    from hashlib import sha256
+                    prefix_hash = sha256(result.prefix.encode()).hexdigest()[:12]
+                    tier = classify_tier(r)
+                    tier_counts[tier.value] += 1
+                    if tier.value != "discard":
+                        save_to_tier(result.prefix, tier, prefix_hash, corpus_dir)
 
             if result.has_golden:
                 stats["golden"] += 1
@@ -233,6 +246,23 @@ def fuzz(
 
     if diag_logger:
         typer.echo(f"\nDiagnostics logged to {diag_logger.log_path}")
+
+        # Generate and save campaign summary
+        summary = generate_campaign_summary(diag_logger.log_path)
+        summary_path = diag_logger.log_path.with_suffix('.md')
+        summary_path.write_text(summary)
+        typer.echo(f"Campaign summary saved to {summary_path}")
+
+    # Print tier distribution
+    if tier_counts:
+        typer.echo("\nCorpus tier distribution:")
+        for tier_name in ["tier-0", "tier-1", "tier-2", "discard"]:
+            count = tier_counts[tier_name]
+            if count > 0:
+                icon = "🎯" if tier_name == "tier-0" else ""
+                typer.echo(f"  {tier_name:10s} {count:4d} {icon}")
+        if corpus_dir:
+            typer.echo(f"\nTiered corpus saved to {corpus_dir}")
 
 
 @app.command()
