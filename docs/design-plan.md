@@ -482,7 +482,7 @@ For every golden signal candidate and every Tier 0 prefix:
 
 ---
 
-## Phase 9: RL-Guided Exploration — NOT STARTED
+## Phase 9: RL-Guided Exploration — NOT STARTED - (TENTATIVE/MAYBE) 
 
 > **Motivation:** DeepSeek-Prover v2 demonstrated that an RL-trained AI system can exploit subtle Lean bugs (a front-end issue in their case, but the principle applies to kernel bugs). This validates our LLM-guided approach and suggests RL-based exploration as a high-leverage future direction.
 
