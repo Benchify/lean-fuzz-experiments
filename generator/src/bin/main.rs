@@ -460,6 +460,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Harness: unparse → write → lake build → comparator → safeverify → categorize
     let mut harness = move |input: &NautilusInput| -> ExitKind {
+        log::debug!("Harness executing...");
         let prefix = generate_one(&ctx_clone, input);
         let golden_suffix = "\n\n-- GOLDEN CHECK\ntheorem soundness_check : False := by\n  simp_all\n  omega\n  decide\n";
         let code = format!("{}{}", prefix, golden_suffix);
@@ -468,10 +469,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (_temp_dir, temp_template) = match setup_temp_environment(&template_dir_clone, &code) {
             Ok(env) => env,
             Err(e) => {
-                log::warn!("{}", e);
+                log::error!("Setup failed: {}", e);
                 return ExitKind::Ok;
             }
         };
+
+        log::debug!("Running verifiers...");
 
         // Run verifiers
         let lake_success = run_lake_build(&temp_template);
