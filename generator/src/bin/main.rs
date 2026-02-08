@@ -47,7 +47,10 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    // Suppress LibAFL's "Address already in use" errors (expected when workers connect)
+    env_logger::Builder::from_default_env()
+        .filter_module("libafl_bolts::os::unix_shmem_server", log::LevelFilter::Off)
+        .init();
 
     // Load .env file for COMPARATOR_PATH
     let _ = dotenvy::from_filename("../.env").or_else(|_| dotenvy::from_filename(".env"));
