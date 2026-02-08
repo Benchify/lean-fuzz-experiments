@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::fs;
 
+use clap::Parser;
 use libafl::corpus::{InMemoryCorpus, OnDiskCorpus};
 use libafl::events::SimpleEventManager;
 use libafl::executors::{ExitKind, InProcessExecutor};
@@ -30,8 +31,18 @@ const TEMPLATE_DIR: &str = "../template";
 /// File within the template project where generated code is injected.
 const TARGET_FILE: &str = "../template/Template/Basic.lean";
 
+/// Lean 4 Grammar Fuzzer (Nautilus)
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Maximum tree depth for grammar generation
+    #[arg(short, long, default_value_t = 15)]
+    depth: usize,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
+    let args = Args::parse();
 
     let template_dir = PathBuf::from(TEMPLATE_DIR)
         .canonicalize()
@@ -47,10 +58,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[*] Lean 4 Grammar Fuzzer (Nautilus)");
     println!("[*] Template dir: {}", template_dir.display());
     println!("[*] Target file:  {}", target_file.display());
+    println!("[*] Tree depth:   {}", args.depth);
 
     // Build the Nautilus grammar context
-    // tree_depth=15 produces moderately complex programs
-    let ctx = create_context(15);
+    let ctx = create_context(args.depth);
     println!(
         "[*] Grammar loaded: {} rules",
         generator::grammar::lean4_rules().len()
