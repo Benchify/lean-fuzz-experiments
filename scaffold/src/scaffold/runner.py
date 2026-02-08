@@ -9,12 +9,15 @@ Commands:
 import hashlib
 import logging
 import subprocess
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 
+from scaffold.diagnostic_log import DiagnosticLogger
+from scaffold.diagnostics import summary_categories
 from scaffold.executor import (
     MONOREPO,
     TemplatePool,
@@ -23,7 +26,7 @@ from scaffold.executor import (
     run_gen_sample,
 )
 from scaffold.golden_suffixes import SUFFIX_BY_NAME
-from scaffold.models import PrefixResult, Verdict
+from scaffold.models import ErrorCategory, PrefixResult, Verdict
 
 app = typer.Typer(help="Poisoned Prefix Fuzzer for Lean 4 soundness testing.")
 
@@ -83,6 +86,7 @@ def test_prefix(
     pool_size: int = typer.Option(2, help="Number of template pool slots."),
     pool_dir: Path = typer.Option(DEFAULT_POOL_DIR, help="Pool directory."),
     timeout: int = typer.Option(120, help="Build timeout per suffix (seconds)."),
+    diagnostics: bool = typer.Option(True, help="Enable diagnostic logging."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Test a single .lean file against golden suffixes."""
@@ -93,6 +97,8 @@ def test_prefix(
 
     pool = TemplatePool(pool_dir=pool_dir, pool_size=pool_size)
     pool.initialize()
+
+    diag_logger = DiagnosticLogger() if diagnostics else None
 
     suffixes = None
     if suffix:
@@ -116,6 +122,15 @@ def test_prefix(
         typer.echo(f"  [{icon}] {r.suffix_name:15s} — {r.reason}")
         if r.axioms:
             typer.echo(f"        axioms: {r.axioms}")
+        if r.diagnostics and verbose:
+            for d in r.diagnostics:
+                typer.echo(f"        L{d.line}:{d.column} [{d.category}] {d.message}")
+
+        if diag_logger:
+            diag_logger.log(prefix, r)
+
+    if diag_logger:
+        typer.echo(f"\nDiagnostics logged to {diag_logger.log_path}")
 
     if result.has_golden:
         saved = _save_golden(prefix, result)
@@ -133,6 +148,7 @@ def fuzz(
     pool_size: int = typer.Option(8, help="Number of parallel pool slots."),
     pool_dir: Path = typer.Option(DEFAULT_POOL_DIR, help="Pool directory."),
     timeout: int = typer.Option(120, help="Build timeout per suffix (seconds)."),
+    diagnostics: bool = typer.Option(True, help="Enable diagnostic logging."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Generate prefixes via gen-sample and test against golden suffixes."""
@@ -144,6 +160,9 @@ def fuzz(
     pool = TemplatePool(pool_dir=pool_dir, pool_size=pool_size)
     pool.initialize()
     typer.echo(f"Pool ready: {pool_size} slots at {pool_dir}")
+
+    diag_logger = DiagnosticLogger() if diagnostics else None
+    error_counter: Counter[ErrorCategory] = Counter()
 
     # Generate all prefixes upfront.
     typer.echo(f"Generating {iterations} prefixes (depth={depth})...")
@@ -170,6 +189,13 @@ def fuzz(
         futures = {executor.submit(_test_one, i, p): i for i, p in enumerate(prefixes)}
         for future in as_completed(futures):
             idx, result = future.result()
+
+            # Log diagnostics for every suffix result.
+            for r in result.results:
+                if diag_logger:
+                    diag_logger.log(result.prefix, r)
+                for cat in summary_categories(r.diagnostics):
+                    error_counter[cat] += 1
 
             if result.has_golden:
                 stats["golden"] += 1
@@ -198,6 +224,14 @@ def fuzz(
         f" | timeout={stats['timeout']}"
         f" | gen_failures={gen_failures}"
     )
+
+    if error_counter:
+        typer.echo("\nError category distribution:")
+        for cat, count in error_counter.most_common():
+            typer.echo(f"  {cat.value:25s} {count}")
+
+    if diag_logger:
+        typer.echo(f"\nDiagnostics logged to {diag_logger.log_path}")
 
 
 def main() -> None:
