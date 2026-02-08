@@ -118,22 +118,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match build_result {
             Ok(output) => {
                 if output.status.success() {
-                    // Build succeeded — check for golden signal
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if !stderr.contains("sorry") {
-                        // Potential golden signal! Save the code.
-                        let timestamp = current_nanos();
-                        let save_path = format!("solutions/golden_{timestamp}.lean");
-                        if let Err(e) = fs::write(&save_path, &code) {
-                            log::warn!("Failed to save golden candidate: {e}");
-                        } else {
-                            println!("\n[!!!] GOLDEN SIGNAL CANDIDATE: {save_path}");
-                            println!("[!!!] Code:\n{code}");
-                        }
-                        // Report as crash to trigger objective feedback
-                        return ExitKind::Crash;
+                    // Build succeeded — potential golden signal!
+                    // Save the code since sorry is no longer in the grammar.
+                    let timestamp = current_nanos();
+                    let save_path = format!("solutions/golden_{timestamp}.lean");
+                    if let Err(e) = fs::write(&save_path, &code) {
+                        log::warn!("Failed to save golden candidate: {e}");
+                    } else {
+                        println!("\n[!!!] GOLDEN SIGNAL CANDIDATE: {save_path}");
+                        println!("[!!!] Code:\n{code}");
                     }
-                    ExitKind::Ok
+                    // Report as crash to trigger objective feedback
+                    return ExitKind::Crash;
                 } else {
                     // Build failed — normal case for most generated code
                     ExitKind::Ok

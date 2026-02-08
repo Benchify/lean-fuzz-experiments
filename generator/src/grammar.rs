@@ -364,7 +364,6 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("TERM", "@{IDENT} {TERM}"),
         ("TERM", "show {TYPE} from {TERM}"),
         ("TERM", "have {IDENT} : {PROP_TYPE} := {PROOF_TERM}\n{TERM}"),
-        ("TERM", "sorry"),
         ("TERM", "by {TACTIC}"),
         ("TERM", "by\n  {TACTIC_SEQ}"),
         ("TERM", "inferInstance"),
@@ -380,7 +379,6 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("PROOF_TERM", "trivial"),
         ("PROOF_TERM", "⟨⟩"),
         ("PROOF_TERM", "True.intro"),
-        ("PROOF_TERM", "sorry"),
         ("PROOF_TERM", "by {TACTIC}"),
         ("PROOF_TERM", "by\n  {TACTIC_SEQ}"),
         ("PROOF_TERM", "{IDENT}"),
@@ -503,7 +501,6 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("TACTIC", "exists {TERM}"),
         ("TACTIC", "refine {PROOF_TERM}"),
         ("TACTIC", "refine ?_"),
-        ("TACTIC", "sorry"),
         ("TACTIC", "aesop"),
         ("TACTIC", "native_decide"),
         ("TACTIC", "unfold {IDENT}"),
@@ -719,11 +716,9 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("ELAB_DECL", "elab \"{IDENT}_cmd\" : command => do\n  let env ← Lean.Elab.Command.getEnv\n  let some info := env.find? `{IDENT}\n    | throwError \"not found\"\n  Lean.logInfo s!\"found: \\{info.name\\}\""),
 
         // MACRO_DECL — syntax macros
-        ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `(sorry)"),
         ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `({TERM})"),
         ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `(by trivial)"),
         ("MACRO_DECL", "macro \"{IDENT}_mac\" : command => `(#check {TERM})"),
-        ("MACRO_DECL", "syntax \"{IDENT}_syn\" : term\nmacro_rules\n  | `({IDENT}_syn) => `(sorry)"),
     ]
 }
 
@@ -871,8 +866,8 @@ mod tests {
     fn rule_count_regression() {
         let count = rules_raw().len();
         assert_eq!(
-            count, 525,
-            "expected exactly 525 rules, got {count} — was a rule accidentally added or removed?"
+            count, 520,
+            "expected exactly 520 rules, got {count} — was a rule accidentally added or removed?"
         );
     }
 
