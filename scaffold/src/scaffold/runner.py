@@ -16,6 +16,7 @@ from pathlib import Path
 
 import typer
 
+from scaffold.campaign_report import generate_campaign_summary
 from scaffold.diagnostic_log import DiagnosticLogger
 from scaffold.diagnostics import summary_categories
 from scaffold.executor import (
@@ -232,6 +233,31 @@ def fuzz(
 
     if diag_logger:
         typer.echo(f"\nDiagnostics logged to {diag_logger.log_path}")
+
+
+@app.command()
+def report(
+    log_file: Path = typer.Argument(..., help="Path to diagnostic .jsonl log file"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Save summary to file (default: print to stdout)"),
+) -> None:
+    """Generate campaign summary report from diagnostic log.
+
+    Args:
+        log_file: Path to the diagnostic JSONL log
+        output: Optional output file for summary (prints to stdout if not specified)
+    """
+    if not log_file.exists():
+        typer.echo(f"Error: Log file not found: {log_file}", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"Generating summary from {log_file}...")
+    summary = generate_campaign_summary(log_file)
+
+    if output:
+        output.write_text(summary)
+        typer.echo(f"Summary saved to {output}")
+    else:
+        typer.echo("\n" + summary)
 
 
 def main() -> None:
