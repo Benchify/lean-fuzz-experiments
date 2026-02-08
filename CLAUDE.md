@@ -15,6 +15,15 @@ We utilize a three-tier architecture to bridge the gap between high-performance 
 2. The Scaffold (Python/uv): The "orchestrator." It manages the high-velocity handoff. It takes the output from the generator, injects it into a clean Lean environment, and runs the Lean compiler. It monitors for the "Golden Bug": a state where lake build returns a success code despite the presence of an impossible logical claim.
 3. The Template (Lean 4): The "sandbox." A pre-configured Lean project that provides the necessary context and imports for the fuzzer. It serves as the baseline environment to ensure every test case is evaluated under standard library conditions.
 
+## Testing the Scaffold
+Test fixtures (small `.lean` files) live in `scaffold/src/tests/fixtures/` — use these for verifying scaffold behavior rather than `artifacts/text2text-agents/`, which is research data and not a stable test dependency.
+
+```sh
+cd scaffold
+uv run pytest src/tests/ -v                                           # unit tests
+uv run scaffold test-prefix src/tests/fixtures/parse_error.lean -v    # integration smoke test
+```
+
 ## Building Lean Projects
 Use [`comparator`](https://github.com/leanprover/comparator), not _just_ vanilla `lake build` for checking Lean projects. `comparator` provides differential testing capabilities that are essential for our fuzzing workflow. We should maybe also use [`safeverify`](https://github.com/gasstationmanager/safeverify) as well.
 
