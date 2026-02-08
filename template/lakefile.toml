@@ -5,6 +5,12 @@ defaultTargets = ["template"]
 [[lean_lib]]
 name = "Template"
 
+[[lean_lib]]
+name = "Challenge"
+
+[[lean_lib]]
+name = "Solution"
+
 [[lean_exe]]
 name = "template"
 root = "Main"
