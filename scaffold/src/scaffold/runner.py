@@ -36,6 +36,59 @@ DEFAULT_POOL_DIR = MONOREPO / "artifacts" / "pool"
 GOLDEN_SIGNALS_DIR = MONOREPO / "artifacts" / "golden-signals"
 
 
+def _parse_duration(duration_str: str) -> int:
+    """Parse duration string to seconds.
+
+    Supports: '8h', '30m', '45s', '2h30m', '1h30m45s'
+    """
+    import re
+    total_seconds = 0
+
+    # Parse hours
+    if 'h' in duration_str:
+        match = re.search(r'(\d+)h', duration_str)
+        if match:
+            total_seconds += int(match.group(1)) * 3600
+
+    # Parse minutes
+    if 'm' in duration_str:
+        match = re.search(r'(\d+)m', duration_str)
+        if match:
+            total_seconds += int(match.group(1)) * 60
+
+    # Parse seconds
+    if 's' in duration_str and 'h' not in duration_str and 'm' not in duration_str:
+        match = re.search(r'(\d+)s', duration_str)
+        if match:
+            total_seconds += int(match.group(1))
+
+    return total_seconds or 3600  # Default 1h if parse fails
+
+
+def _save_checkpoint(
+    campaign_dir: Path | None,
+    diag_logger,
+    tier_counts: Counter[str],
+    tier_0_prefixes: list[tuple[str, str]],
+    checkpoint_num: int,
+) -> None:
+    """Save intermediate checkpoint during long campaigns."""
+    if not campaign_dir or not diag_logger:
+        return
+
+    checkpoint_dir = campaign_dir / "checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True)
+
+    # Save intermediate summary
+    summary = generate_campaign_summary(diag_logger.log_path)
+    checkpoint_path = checkpoint_dir / f"checkpoint_{checkpoint_num:04d}.md"
+    checkpoint_path.write_text(summary)
+
+    # Save tier stats
+    tier_stats = "\n".join(f"{tier}: {count}" for tier, count in tier_counts.items())
+    (checkpoint_dir / f"tiers_{checkpoint_num:04d}.txt").write_text(tier_stats)
+
+
 def _generate_near_misses(tier_0_prefixes: list[tuple[str, str]]) -> str:
     """Generate a near-misses report from Tier 0 prefixes.
 
@@ -191,10 +244,21 @@ def fuzz(
     diagnostics: bool = typer.Option(True, help="Enable diagnostic logging."),
     corpus: bool = typer.Option(True, help="Save tiered corpus for reuse."),
     campaign: str | None = typer.Option(None, help="Campaign name for organized artifacts."),
+    duration: str | None = typer.Option(None, help="Duration limit (e.g., '8h', '30m', '2h30m')."),
+    checkpoint_every: int = typer.Option(100, help="Save checkpoint every N prefixes."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:
     """Generate prefixes via gen-sample and test against golden suffixes."""
+    import signal
+    import time
     _setup_logging(verbose)
+
+    # Parse duration if provided
+    end_time = None
+    if duration:
+        duration_seconds = _parse_duration(duration)
+        end_time = time.time() + duration_seconds
+        typer.echo(f"Duration limit: {duration} ({duration_seconds}s)")
 
     gen_sample_bin = find_gen_sample()
     typer.echo(f"Using gen-sample: {gen_sample_bin}")
@@ -218,16 +282,21 @@ def fuzz(
     tier_counts: Counter[str] = Counter()
     tier_0_prefixes: list[tuple[str, str]] = []  # (prefix_hash, prefix_code) for near-misses
 
-    # Generate all prefixes upfront.
-    typer.echo(f"Generating {iterations} prefixes (depth={depth})...")
+    # Generate prefixes incrementally (allows duration limits and checkpoints)
+    typer.echo(f"Generating up to {iterations} prefixes (depth={depth})...")
     prefixes: list[str] = []
     gen_failures = 0
-    for _ in range(iterations):
+    checkpoint_count = 0
+
+    for i in range(iterations):
+        # Check duration limit
+        if end_time and time.time() >= end_time:
+            typer.echo(f"\n⏱️  Duration limit reached. Generated {len(prefixes)} prefixes.")
+            break
+
         try:
             prefixes.append(run_gen_sample(gen_sample_bin, depth))
-        except RuntimeError:
-            gen_failures += 1
-        except subprocess.TimeoutExpired:
+        except (RuntimeError, subprocess.TimeoutExpired):
             gen_failures += 1
 
     if gen_failures:
@@ -235,6 +304,9 @@ def fuzz(
 
     # Test prefixes in parallel across pool slots.
     stats = {"golden": 0, "false_positive": 0, "build_failed": 0, "timeout": 0}
+    tested_count = 0
+    novel_errors: set[str] = set()  # Track unknown error patterns
+    longest_surviving = {"prefix": "", "stage": 0, "hash": ""}  # Track furthest prefix
 
     def _test_one(idx: int, prefix: str) -> tuple[int, PrefixResult]:
         return idx, execute_prefix(prefix, pool, timeout=timeout)
@@ -243,6 +315,7 @@ def fuzz(
         futures = {executor.submit(_test_one, i, p): i for i, p in enumerate(prefixes)}
         for future in as_completed(futures):
             idx, result = future.result()
+            tested_count += 1
 
             # Log diagnostics for every suffix result.
             for r in result.results:
@@ -262,6 +335,24 @@ def fuzz(
                     # Track Tier 0 for near-misses report
                     if tier.value == "tier-0":
                         tier_0_prefixes.append((prefix_hash, result.prefix))
+
+                # Track novel error patterns (not in known categories)
+                if not r.diagnostics and r.verdict == Verdict.BUILD_FAILED:
+                    # Extract unique error patterns from raw stderr
+                    error_lines = [line for line in r.raw_stderr.split('\n') if 'error:' in line.lower()]
+                    for error_line in error_lines[:3]:  # First 3 errors
+                        novel_errors.add(error_line[:100])
+
+            # Periodic checkpoint
+            if checkpoint_every > 0 and tested_count % checkpoint_every == 0:
+                checkpoint_count += 1
+                _save_checkpoint(campaign_dir, diag_logger, tier_counts, tier_0_prefixes, checkpoint_count)
+                typer.echo(f"\n💾 Checkpoint {checkpoint_count} saved ({tested_count} tested)")
+
+            # Check duration limit after each test
+            if end_time and time.time() >= end_time:
+                typer.echo(f"\n⏱️  Duration limit reached. Tested {tested_count}/{len(prefixes)} prefixes.")
+                break
 
             if result.has_golden:
                 stats["golden"] += 1
@@ -319,6 +410,14 @@ def fuzz(
         near_misses_path.write_text(near_misses)
         typer.echo(f"Near-misses report saved to {near_misses_path}")
 
+    # Report novel error patterns
+    if novel_errors:
+        typer.echo(f"\n🔍 Novel error patterns detected: {len(novel_errors)}")
+        if campaign_dir:
+            novel_path = campaign_dir / "novel-errors.txt"
+            novel_path.write_text("\n".join(sorted(novel_errors)))
+            typer.echo(f"   Saved to {novel_path}")
+
     # Print tier distribution
     if tier_counts:
         typer.echo("\nCorpus tier distribution:")
@@ -332,6 +431,10 @@ def fuzz(
 
     if campaign_dir:
         typer.echo(f"\n📁 Campaign artifacts in {campaign_dir}")
+
+    # Show checkpoints saved
+    if checkpoint_count > 0:
+        typer.echo(f"💾 {checkpoint_count} checkpoints saved")
 
 
 @app.command()
