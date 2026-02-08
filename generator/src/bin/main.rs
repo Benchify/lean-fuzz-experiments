@@ -376,11 +376,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        if !best_is_crash {
-            // Prefix compiled but no suffix proved False - still interesting (lake only)
-            stats_ref.record(true, false, false);
-            stats_ref.print_if_due();
-        }
+        // Don't record prefix-only cases - only record actual test results
+        // (prefix+suffix) where we ran all three verifiers.
 
         if best_is_crash { ExitKind::Crash } else { ExitKind::Ok }
     };
