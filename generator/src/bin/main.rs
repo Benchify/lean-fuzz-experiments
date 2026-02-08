@@ -60,11 +60,21 @@ impl VerifierStats {
     }
 
     fn print_table(&self) {
-        let mut last = self.last_print.lock().unwrap();
-        if last.elapsed() < Duration::from_secs(60) {
-            return;  // Don't print too frequently
+        self.print_table_internal(false);
+    }
+
+    fn print_final_summary(&self) {
+        self.print_table_internal(true);
+    }
+
+    fn print_table_internal(&self, force: bool) {
+        if !force {
+            let mut last = self.last_print.lock().unwrap();
+            if last.elapsed() < Duration::from_secs(60) {
+                return;  // Don't print too frequently
+            }
+            *last = Instant::now();
         }
-        *last = Instant::now();
 
         let total: usize = self.counters.iter().map(|c| c.load(Ordering::Relaxed)).sum();
         if total == 0 {
@@ -421,7 +431,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run the fuzzer
     println!("[*] Starting fuzz loop...");
-    fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)?;
+    let fuzz_result = fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr);
 
+    // Print final summary (even on Ctrl+C)
+    println!("\n[*] Fuzzing campaign ended");
+    stats.print_final_summary();
+
+    fuzz_result?;
     Ok(())
 }
