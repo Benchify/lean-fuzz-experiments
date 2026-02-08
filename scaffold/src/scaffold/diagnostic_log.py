@@ -9,11 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scaffold.diagnostics import summary_categories
+from scaffold.executor import MONOREPO
 from scaffold.models import DiagnosticRecord, OracleResult
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_LOG_DIR = Path(__file__).resolve().parents[4] / "artifacts" / "diagnostics"
+_DEFAULT_LOG_DIR = MONOREPO / "artifacts" / "diagnostics"
 
 
 class DiagnosticLogger:
