@@ -18,16 +18,14 @@ fn random_mutation_100x_no_panic() {
     let (mut input, mut state) = make_seed(&ctx);
     let mut mutator = NautilusRandomMutator::new(&ctx);
 
-    let mut non_empty = 0;
-    for _ in 0..100 {
+    for i in 0..100 {
         let _ = mutator.mutate(&mut state, &mut input);
         let output = generate_one(&ctx, &input);
-        if !output.is_empty() {
-            non_empty += 1;
-        }
+        assert!(
+            !output.is_empty(),
+            "random mutation {i} produced empty output"
+        );
     }
-    // Most mutations should produce non-empty output (some hit empty PREAMBLE rule)
-    assert!(non_empty > 50, "only {non_empty}/100 mutations were non-empty");
 }
 
 #[test]

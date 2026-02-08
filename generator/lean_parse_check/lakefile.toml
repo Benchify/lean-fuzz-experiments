@@ -1,0 +1,7 @@
+name = "lean_parse_check"
+version = "0.1.0"
+defaultTargets = ["lean_parse_check"]
+
+[[lean_exe]]
+name = "lean_parse_check"
+root = "Main"

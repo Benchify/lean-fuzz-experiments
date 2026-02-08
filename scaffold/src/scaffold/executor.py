@@ -177,7 +177,7 @@ def run_gen_sample(depth: int = 15, *, prefix_only: bool = True) -> str:
             Default True for the scaffold pipeline where golden suffixes
             are appended separately.
     """
-    cmd = ["cargo", "run", "--bin", "gen_sample", "--"]
+    cmd = ["cargo", "+nightly", "run", "--bin", "gen_sample", "--"]
     if prefix_only:
         cmd.append("--prefix-only")
     cmd.append(str(depth))

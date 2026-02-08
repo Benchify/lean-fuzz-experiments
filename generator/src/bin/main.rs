@@ -4,6 +4,7 @@ use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use core::time::Duration as CoreDuration;
 
 use clap::Parser;
 use comfy_table::{Table, Cell, Color, Attribute, presets::UTF8_FULL};
@@ -171,7 +172,7 @@ fn setup_temp_environment(template_dir: &Path, code: &str) -> Result<(TempDir, P
     opts.copy_inside = true;
     fs_extra::dir::copy(template_dir, temp_dir.path(), &opts)
         .map_err(|e| format!("copy: {e}"))?;
-    let _ = fs::remove_dir_all(temp_template.join(".lake"));
+    // Keep .lake/ — deleting it forces full rebuild per test (very slow)
     fs::write(temp_template.join("Solution.lean"), code)
         .map_err(|e| format!("write: {e}"))?;
     Ok((temp_dir, temp_template))
@@ -336,22 +337,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stats = Arc::new(VerifierStats::new());
     let stats_ref = Arc::clone(&stats);
 
-    // Harness: iterate golden suffixes, run verifiers on first compile success
+    // Harness: one temp dir per prefix, try golden suffixes only if prefix compiles
     let mut harness = |input: &NautilusInput| -> ExitKind {
         let prefix = generate_one(&ctx, input);
-        let mut best_is_crash = false;
 
+        // Create ONE temp dir for this prefix (reused across all suffixes)
+        let (_td, temp) = match setup_temp_environment(&template_dir, &prefix) {
+            Ok(v) => v,
+            Err(_) => return ExitKind::Ok,
+        };
+
+        // Quick check: does the prefix alone compile?
+        if !run_lake_build(&temp) {
+            stats_ref.record(false, false, false);
+            stats_ref.print_if_due();
+            return ExitKind::Ok;
+        }
+
+        // Prefix compiles! Now try each golden suffix in the SAME temp dir.
+        let mut best_is_crash = false;
         for &(suffix_name, golden_suffix) in GOLDEN_SUFFIXES {
             let code = format!("{}{}", prefix, golden_suffix);
-
-            let (_td, temp) = match setup_temp_environment(&template_dir, &code) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
+            // Overwrite Solution.lean with prefix+suffix
+            if fs::write(temp.join("Solution.lean"), &code).is_err() { continue; }
             if !run_lake_build(&temp) { continue; }
 
-            // Lake passed! Run verifiers.
+            // This suffix compiled! Run verifiers.
             let comp = run_comparator(&temp, &comparator_path);
             let safe = run_safeverify(&temp, &safeverify_path);
 
@@ -365,20 +376,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Record FAIL/FAIL/FAIL once if no suffix compiled
-        if !best_is_crash {
-            stats_ref.record(false, false, false);
-            stats_ref.print_if_due();
-        }
+        // Don't record prefix-only cases - only record actual test results
+        // (prefix+suffix) where we ran all three verifiers.
 
         if best_is_crash { ExitKind::Crash } else { ExitKind::Ok }
     };
 
-    let mut executor = InProcessExecutor::new(&mut harness, (), &mut fuzzer, &mut state, &mut mgr)?;
+    // 120s timeout per test (7 golden suffixes × lake build can take a while)
+    let mut executor = InProcessExecutor::with_timeout(
+        &mut harness, (), &mut fuzzer, &mut state, &mut mgr,
+        CoreDuration::from_secs(120),
+    )?;
     let mut generator = NautilusGenerator::new(&ctx);
 
+    // Single initial seed (each seed runs 7 golden suffixes × lake build, so keep it minimal)
     println!("[*] Generating initial corpus...");
-    state.generate_initial_inputs_forced(&mut fuzzer, &mut executor, &mut generator, &mut mgr, 2)?;
+    state.generate_initial_inputs_forced(&mut fuzzer, &mut executor, &mut generator, &mut mgr, 1)?;
     println!("[*] Initial corpus generated");
 
     let mutator = HavocScheduledMutator::new(tuple_list!(

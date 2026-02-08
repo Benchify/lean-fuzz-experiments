@@ -50,7 +50,6 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("FILE", "{PREAMBLE}\n\n{PROGRAM}"),
         ("FILE", "{PREAMBLE}\n\n{PROGRAM}\n\n{PROGRAM}"),
         ("FILE", "{PREAMBLE}\n\n{PROGRAM}\n\n{PROGRAM}\n\n{PROGRAM}"),
-        ("FILE", "{PREAMBLE}"),
 
         // PREAMBLE — imports and universe declarations
         ("PREAMBLE", "{IMPORTS}\n{UNIVERSE_DECLS}\n{OPEN_DECLS}"),
@@ -1092,7 +1091,7 @@ mod tests {
     fn rule_count_regression() {
         let count = rules_raw().len();
         assert_eq!(
-            count, 613,
+            count, 612,
             "expected exactly 613 rules, got {count} — was a rule accidentally added or removed?"
         );
     }
@@ -1160,7 +1159,7 @@ mod tests {
     fn prefix_rule_count_regression() {
         let count = prefix_rules_raw().len();
         assert_eq!(
-            count, 504,
+            count, 503,
             "expected exactly 504 prefix rules, got {count} — was a rule accidentally added or removed?"
         );
     }
