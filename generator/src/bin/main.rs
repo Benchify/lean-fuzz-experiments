@@ -150,7 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // Copy template to temp (preserves .lake/ build cache for speed)
+        // Copy template to temp (exclude .lake/ to save memory)
         let temp_template = temp_dir.path().join("template");
         let mut copy_options = CopyOptions::new();
         copy_options.copy_inside = true;
@@ -159,6 +159,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             log::warn!("Failed to copy template to temp: {e}");
             return ExitKind::Ok;
         }
+
+        // Remove .lake/ from temp copy to save memory
+        let _ = fs::remove_dir_all(temp_template.join(".lake"));
 
         // Write generated code to temp copy
         let temp_solution = temp_template.join("Solution.lean");
