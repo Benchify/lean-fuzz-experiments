@@ -4,16 +4,7 @@ Each suffix is appended to a fuzzer-generated prefix. If `lake build`
 succeeds on the combined file, the prefix has exploited a soundness bug.
 """
 
-from pydantic import BaseModel
-
-
-class GoldenSuffix(BaseModel):
-    """A fixed theorem claiming False (or equivalent) with a specific tactic."""
-
-    name: str
-    code: str
-    description: str
-
+from scaffold.models import GoldenSuffix
 
 GOLDEN_SUFFIXES: list[GoldenSuffix] = [
     GoldenSuffix(

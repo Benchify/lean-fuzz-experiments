@@ -17,14 +17,13 @@ import typer
 
 from scaffold.executor import (
     MONOREPO,
-    PrefixResult,
     TemplatePool,
     execute_prefix,
     find_gen_sample,
     run_gen_sample,
 )
 from scaffold.golden_suffixes import SUFFIX_BY_NAME
-from scaffold.oracle import Verdict
+from scaffold.models import PrefixResult, Verdict
 
 app = typer.Typer(help="Poisoned Prefix Fuzzer for Lean 4 soundness testing.")
 

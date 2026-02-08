@@ -6,29 +6,8 @@ build failure.
 """
 
 import re
-from enum import StrEnum
 
-from pydantic import BaseModel
-
-
-class Verdict(StrEnum):
-    """Outcome of judging a single prefix+suffix execution."""
-
-    GOLDEN = "GOLDEN"
-    FALSE_POSITIVE = "FALSE_POSITIVE"
-    BUILD_FAILED = "BUILD_FAILED"
-    TIMEOUT = "TIMEOUT"
-
-
-class OracleResult(BaseModel):
-    """Result of the oracle's judgement on one prefix+suffix pair."""
-
-    suffix_name: str
-    verdict: Verdict
-    exit_code: int
-    reason: str
-    axioms: list[str] = []
-
+from scaffold.models import OracleResult, Verdict
 
 # Patterns that indicate the prefix is "cheating" rather than exploiting a real bug.
 _ESCAPE_HATCH_PATTERNS: list[tuple[str, re.Pattern[str]]] = [

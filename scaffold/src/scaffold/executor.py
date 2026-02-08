@@ -10,31 +10,13 @@ import subprocess
 from pathlib import Path
 from queue import Empty, Queue
 
-from pydantic import BaseModel
-
-from scaffold.golden_suffixes import GOLDEN_SUFFIXES, GoldenSuffix
-from scaffold.oracle import OracleResult, Verdict, judge
+from scaffold.golden_suffixes import GOLDEN_SUFFIXES
+from scaffold.models import GoldenSuffix, OracleResult, PrefixResult, Verdict
+from scaffold.oracle import judge
 
 logger = logging.getLogger(__name__)
 
 MONOREPO = Path(__file__).resolve().parents[3]
-
-
-class PrefixResult(BaseModel):
-    """Aggregated results from testing one prefix against all golden suffixes."""
-
-    prefix: str
-    results: list[OracleResult]
-
-    @property
-    def has_golden(self) -> bool:
-        """Whether any suffix produced a GOLDEN verdict."""
-        return any(r.verdict == Verdict.GOLDEN for r in self.results)
-
-    @property
-    def has_false_positive(self) -> bool:
-        """Whether any suffix produced a FALSE_POSITIVE verdict."""
-        return any(r.verdict == Verdict.FALSE_POSITIVE for r in self.results)
 
 
 class TemplatePool:
