@@ -1,20 +1,21 @@
 # Lean 4 Soundness Fuzzer Makefile
 
 # Configuration
-JOBS ?= 4
+JOBS ?= 2
 DEPTH ?= 15
 
 .PHONY: run build test clean help
 
 # Default target: run parallel fuzzing
 run: build
-	@echo "[*] Starting $(JOBS) parallel fuzzer instances (depth=$(DEPTH))"
+	@echo "[*] Starting $(JOBS) parallel fuzzer workers (depth=$(DEPTH))"
+	@echo "[*] Workers share corpus via LibAFL LLMP"
 	@echo "[*] Press Ctrl+C to stop all instances"
 	@cd generator && \
 	for i in $$(seq 1 $(JOBS)); do \
-		echo "[*] Starting instance $$i/$(JOBS)..."; \
+		echo "[*] Starting worker $$i/$(JOBS)..."; \
 		RUST_LOG=warn ./target/release/main --depth $(DEPTH) & \
-		sleep 0.1; \
+		sleep 0.2; \
 	done; \
 	trap 'echo "Stopping..."; kill $$(jobs -p) 2>/dev/null' INT; \
 	wait
