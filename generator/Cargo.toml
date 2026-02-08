@@ -2,21 +2,20 @@
 name = "generator"
 version = "0.1.0"
 edition = "2024"
+default-run = "main"
 
 [lib]
 name = "generator"
 path = "src/lib.rs"
-
-[[bin]]
-name = "generator"
-path = "src/main.rs"
 
 [dependencies]
 libafl = { version = "0.15.4", features = ["nautilus"] }
 libafl_bolts = "0.15.4"
 log = "0.4"
 env_logger = "0.11"
-
-[dev-dependencies]
-libafl = { version = "0.15.4", features = ["nautilus"] }
-libafl_bolts = "0.15.4"
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
+rayon = "1.10"
+sha2 = "0.10"
+chrono = "0.4"
+walkdir = "2"
