@@ -26,7 +26,7 @@ use libafl_bolts::current_nanos;
 use libafl_bolts::rands::StdRand;
 use libafl_bolts::tuples::tuple_list;
 
-use generator::{create_context, generate_one};
+use generator::{create_context, create_prefix_context, generate_one};
 use std::path::Path;
 
 /// Path to the template Lean project (relative to generator crate root).
@@ -150,6 +150,18 @@ fn categorize_and_save(
     }
 }
 
+/// Golden suffixes matching scaffold/src/scaffold/golden_suffixes.py.
+/// Each is appended to the prefix and tested independently.
+const GOLDEN_SUFFIXES: &[(&str, &str)] = &[
+    ("trivial", "\n\ntheorem soundness_check : False := by trivial\n#print axioms soundness_check\n"),
+    ("simp_all", "\n\ntheorem soundness_check : False := by simp_all\n#print axioms soundness_check\n"),
+    ("native_decide", "\n\ntheorem soundness_check : False := by native_decide\n#print axioms soundness_check\n"),
+    ("omega", "\n\ntheorem soundness_check : (0 : Nat) = 1 := by omega\n#print axioms soundness_check\n"),
+    ("decide", "\n\ntheorem soundness_check : False := by decide\n#print axioms soundness_check\n"),
+    ("assumption", "\n\ntheorem soundness_check : False := by assumption\n#print axioms soundness_check\n"),
+    ("inferInstance", "\n\ntheorem soundness_check : False := inferInstance\n#print axioms soundness_check\n"),
+];
+
 /// Lean 4 Grammar Fuzzer (Nautilus)
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -161,6 +173,10 @@ struct Args {
     /// Number of parallel workers (0 = number of CPUs)
     #[arg(short = 'j', long, default_value_t = 1)]
     jobs: usize,
+
+    /// Use prefix-only grammar (no proof terms/tactics, theorems use sorry)
+    #[arg(long, default_value_t = true)]
+    prefix_only: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -201,10 +217,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[*] Tree depth:   {}", args.depth);
 
     // Build the Nautilus grammar context
-    let ctx = create_context(args.depth);
-    println!(
-        "[*] Grammar loaded: {} rules",
+    let ctx = if args.prefix_only {
+        create_prefix_context(args.depth)
+    } else {
+        create_context(args.depth)
+    };
+    let rule_count = if args.prefix_only {
+        generator::grammar::lean4_prefix_rules().len()
+    } else {
         generator::grammar::lean4_rules().len()
+    };
+    println!(
+        "[*] Grammar loaded: {} rules (prefix_only={})",
+        rule_count, args.prefix_only
     );
 
     // Output directories for 3D categorization: Lake × Comparator × SafeVerify
@@ -256,34 +281,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let safeverify_path = std::env::var("SAFEVERIFY_PATH")
         .expect("SAFEVERIFY_PATH not set in .env - please configure it");
 
-    // Harness: unparse → write → lake build → comparator → safeverify → categorize
+    // Harness: unparse → iterate golden suffixes → write → lake build → comparator → safeverify → categorize
     let mut harness = |input: &NautilusInput| -> ExitKind {
         let prefix = generate_one(&ctx, input);
-        let golden_suffix = "\n\n-- GOLDEN CHECK\ntheorem soundness_check : False := by\n  simp_all\n  omega\n  decide\n";
-        let code = format!("{}{}", prefix, golden_suffix);
+        let mut best_is_crash = false;
 
-        // Setup isolated temp environment
-        let (_temp_dir, temp_template) = match setup_temp_environment(&template_dir, &code) {
-            Ok(env) => env,
-            Err(e) => {
-                log::warn!("{}", e);
-                return ExitKind::Ok;
+        for &(suffix_name, golden_suffix) in GOLDEN_SUFFIXES {
+            let code = format!("{}{}", prefix, golden_suffix);
+
+            // Setup isolated temp environment
+            let (_temp_dir, temp_template) = match setup_temp_environment(&template_dir, &code) {
+                Ok(env) => env,
+                Err(e) => {
+                    log::warn!("{}", e);
+                    continue;
+                }
+            };
+
+            // Run lake build first — skip further checks if it fails
+            let lake_success = run_lake_build(&temp_template);
+            if !lake_success {
+                continue;
             }
-        };
 
-        // Run verifiers
-        let lake_success = run_lake_build(&temp_template);
-        let comparator_success = run_comparator(&temp_template, &comparator_path);
-        let safeverify_success = if lake_success {
-            run_safeverify(&temp_template, &safeverify_path)
-        } else {
-            false
-        };
+            // Lake passed — this prefix + suffix compiled! Run verifiers.
+            let comparator_success = run_comparator(&temp_template, &comparator_path);
+            let safeverify_success = run_safeverify(&temp_template, &safeverify_path);
 
-        // Categorize and save
-        let is_crash = categorize_and_save(lake_success, comparator_success, safeverify_success, &code);
+            println!("[*] suffix={} lake=PASS comp={} safe={}", suffix_name,
+                if comparator_success { "PASS" } else { "FAIL" },
+                if safeverify_success { "PASS" } else { "FAIL" });
 
-        if is_crash {
+            // Categorize and save
+            let is_crash = categorize_and_save(lake_success, comparator_success, safeverify_success, &code);
+            if is_crash {
+                best_is_crash = true;
+            }
+        }
+
+        if best_is_crash {
             ExitKind::Crash
         } else {
             ExitKind::Ok

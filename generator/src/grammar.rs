@@ -86,6 +86,11 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("PROGRAM", "{MUTUAL_BLOCK}"),
         ("PROGRAM", "{MUTUAL_BLOCK}\n\n{DECL}"),
         ("PROGRAM", "{DECL}\n\n{MUTUAL_BLOCK}"),
+        // Mixed mutual + section + namespace arrangements
+        ("PROGRAM", "{MUTUAL_BLOCK}\n\n{DECL}\n\n{SECTION_BLOCK}"),
+        ("PROGRAM", "{NAMESPACE_BLOCK}\n\n{DECL}\n\n{MUTUAL_BLOCK}"),
+        ("PROGRAM", "{DECL}\n\n{MUTUAL_BLOCK}\n\n{DECL}\n\n{DECL}"),
+        ("PROGRAM", "{SECTION_BLOCK}\n\n{NAMESPACE_BLOCK}"),
 
         // ================================================================
         // 2. DECLARATIONS
@@ -105,6 +110,11 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("DECL", "{EVAL_CMD}"),
         ("DECL", "{SECTION_BLOCK}"),
         ("DECL", "{NAMESPACE_BLOCK}"),
+        ("DECL", "{ATTR_DECL}"),
+        ("DECL", "{NOTATION_DECL}"),
+        ("DECL", "{SCOPED_DECL}"),
+        ("DECL", "{DERIVE_DECL}"),
+        ("DECL", "{OPTION_CMD}"),
 
         // DEF_DECL
         ("DEF_DECL", "def {IDENT} : {TYPE} := {TERM}"),
@@ -120,6 +130,9 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("DEF_DECL", "unsafe def {IDENT} {BINDERS} : {TYPE} := {TERM}"),
         ("DEF_DECL", "private def {IDENT} : {TYPE} := {TERM}"),
         ("DEF_DECL", "protected def {IDENT} : {TYPE} := {TERM}"),
+        // Quotient-related definitions
+        ("DEF_DECL", "def {IDENT} := Quot.mk {IDENT} {TERM}"),
+        ("DEF_DECL", "def {IDENT} := Quot.lift {TERM} {TERM}"),
 
         // THEOREM_DECL — full grammar includes proof terms and tactic blocks.
         // In prefix-only mode these are replaced with `sorry`-based variants,
@@ -152,6 +165,11 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         // Universe-polymorphic inductives
         ("INDUCTIVE_DECL", "inductive {IDENT_IND}.\\{u\\} : Type u where\n{CTORS}"),
         ("INDUCTIVE_DECL", "inductive {IDENT_IND}.\\{u, v\\} : Type (max u v) where\n{CTORS}"),
+        // Universe-polymorphic with imax (stress kernel universe checking)
+        ("INDUCTIVE_DECL", "inductive {IDENT_IND}.\\{u\\} : Sort (imax u u) where\n{CTORS}"),
+        ("INDUCTIVE_DECL", "inductive {IDENT_IND}.\\{u\\} : Sort (imax 1 u) where\n{CTORS}"),
+        ("INDUCTIVE_DECL", "inductive {IDENT_IND}.\\{u, v\\} : Sort (imax u v) where\n{CTORS}"),
+        ("INDUCTIVE_DECL", "inductive {IDENT_IND}.\\{u\\} : Sort (max u 1) where\n{CTORS}"),
         // Unsafe inductives
         ("INDUCTIVE_DECL", "unsafe inductive {IDENT_IND} where\n{CTORS}"),
 
@@ -190,6 +208,17 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("CTOR_TYPE", "List {IDENT_IND} → {IDENT_IND}"),
         ("CTOR_TYPE", "Array {IDENT_IND} → {IDENT_IND}"),
         ("CTOR_TYPE", "Option {IDENT_IND} → {IDENT_IND}"),
+        // Double/triple negative occurrence (stress positivity checker)
+        ("CTOR_TYPE", "(({IDENT_IND} → {TYPE}) → {TYPE}) → {IDENT_IND}"),
+        ("CTOR_TYPE", "((({IDENT_IND} → Nat) → Bool) → Nat) → {IDENT_IND}"),
+        // Negative via forall
+        ("CTOR_TYPE", "(∀ (_ : {IDENT_IND}), {TYPE}) → {IDENT_IND}"),
+        // Negative via Prod/Sum
+        ("CTOR_TYPE", "({IDENT_IND} × {TYPE}) → {IDENT_IND}"),
+        ("CTOR_TYPE", "Sum {IDENT_IND} {TYPE} → {IDENT_IND}"),
+        // Deeply nested standard types
+        ("CTOR_TYPE", "List (List {IDENT_IND}) → {IDENT_IND}"),
+        ("CTOR_TYPE", "Option (List {IDENT_IND}) → {IDENT_IND}"),
 
         // CTOR_TYPE_PARAM — constructor types for parameterized inductives
         ("CTOR_TYPE_PARAM", "{IDENT_IND} α"),
@@ -198,21 +227,39 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("CTOR_TYPE_PARAM", "{IDENT_IND} α → {IDENT_IND} α"),
         ("CTOR_TYPE_PARAM", "List ({IDENT_IND} α) → {IDENT_IND} α"),
         ("CTOR_TYPE_PARAM", "({IDENT_IND} α → α) → {IDENT_IND} α"),
+        // Double negative in parameterized context
+        ("CTOR_TYPE_PARAM", "(({IDENT_IND} α → α) → α) → {IDENT_IND} α"),
 
-        // ABBREV_DECL
+        // ABBREV_DECL — definitional equality tricks
         ("ABBREV_DECL", "abbrev {IDENT} := {TERM}"),
         ("ABBREV_DECL", "abbrev {IDENT} : {TYPE} := {TERM}"),
         ("ABBREV_DECL", "abbrev {IDENT} {BINDERS} : {TYPE} := {TERM}"),
+        // True/False aliases (try to confuse reduction)
+        ("ABBREV_DECL", "abbrev {IDENT} := True"),
+        ("ABBREV_DECL", "abbrev {IDENT} := False"),
+        ("ABBREV_DECL", "abbrev {IDENT} : Prop := True"),
+        ("ABBREV_DECL", "abbrev {IDENT} : Prop := False"),
+        // Self-referential alias attempt
+        ("ABBREV_DECL", "abbrev {IDENT} := {IDENT_IND}"),
+        ("ABBREV_DECL", "abbrev {IDENT} (α : Type) := α → α"),
 
-        // OPAQUE_DECL
+        // OPAQUE_DECL — definitional equality / reduction blocking
         ("OPAQUE_DECL", "opaque {IDENT} : {TYPE}"),
         ("OPAQUE_DECL", "opaque {IDENT} : {TYPE} := {TERM}"),
+        // Contradictory attribute + opaque combinations
+        ("OPAQUE_DECL", "@[reducible] opaque {IDENT} : {TYPE}"),
+        ("OPAQUE_DECL", "@[simp] opaque {IDENT} : {TYPE} := {TERM}"),
+        ("OPAQUE_DECL", "opaque {IDENT} : Prop := True"),
 
         // CLASS_DECL
         ("CLASS_DECL", "class {IDENT_IND} (α : {TYPE}) where\n  {CLASS_FIELDS}"),
         ("CLASS_DECL", "class {IDENT_IND} (α : {TYPE}) extends {TYPE_ATOM} α where\n  {CLASS_FIELDS}"),
         ("CLASS_DECL", "class {IDENT_IND} (α : {TYPE}) (β : {TYPE}) where\n  {CLASS_FIELDS}"),
         ("CLASS_DECL", "class {IDENT_IND} where\n  {CLASS_FIELDS}"),
+        // Prop-valued class (typeclass with proof fields)
+        ("CLASS_DECL", "class {IDENT_IND} (α : {TYPE}) : Prop where\n  {IDENT} : {PROP_TYPE}"),
+        // Self-extending class (circular extends chain)
+        ("CLASS_DECL", "class {IDENT_IND} (α : {TYPE}) extends {IDENT_IND} α where\n  {CLASS_FIELDS}"),
 
         // CLASS_FIELDS
         ("CLASS_FIELDS", "{IDENT} : {TYPE}"),
@@ -226,6 +273,13 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("INSTANCE_DECL", "instance {IDENT} : {IDENT_IND} {TYPE_ATOM} where\n  {INSTANCE_FIELDS}"),
         ("INSTANCE_DECL", "instance : {IDENT_IND} {TYPE_ATOM} := {TERM}"),
         ("INSTANCE_DECL", "@[default_instance] instance : {IDENT_IND} {TYPE_ATOM} where\n  {INSTANCE_FIELDS}"),
+        // Priority manipulation
+        ("INSTANCE_DECL", "instance (priority := high) : {IDENT_IND} {TYPE_ATOM} where\n  {INSTANCE_FIELDS}"),
+        ("INSTANCE_DECL", "instance (priority := low) : {IDENT_IND} {TYPE_ATOM} where\n  {INSTANCE_FIELDS}"),
+        // Standard typeclass instances (Decidable, BEq, Inhabited)
+        ("INSTANCE_DECL", "instance : Decidable {PROP_TYPE} := {TERM}"),
+        ("INSTANCE_DECL", "instance : BEq {TYPE_ATOM} where\n  beq := fun _ _ => true"),
+        ("INSTANCE_DECL", "instance : Inhabited {TYPE_ATOM} where\n  default := {TERM}"),
 
         // INSTANCE_FIELDS
         ("INSTANCE_FIELDS", "{IDENT} := {TERM}"),
@@ -236,6 +290,12 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("STRUCTURE_DECL", "structure {IDENT_IND} (α : {TYPE}) where\n  {STRUCT_FIELDS}"),
         ("STRUCTURE_DECL", "structure {IDENT_IND} extends {TYPE_ATOM} where\n  {STRUCT_FIELDS}"),
         ("STRUCTURE_DECL", "structure {IDENT_IND} where\n  mk ::\n  {STRUCT_FIELDS}"),
+        // Multiple extends
+        ("STRUCTURE_DECL", "structure {IDENT_IND} extends {TYPE_ATOM}, {TYPE_ATOM} where\n  {STRUCT_FIELDS}"),
+        // Parameterized extends
+        ("STRUCTURE_DECL", "structure {IDENT_IND} (α : {TYPE}) extends {TYPE_ATOM} where\n  {STRUCT_FIELDS}"),
+        // @[ext] attributed structure
+        ("STRUCTURE_DECL", "@[ext] structure {IDENT_IND} where\n  {STRUCT_FIELDS}"),
 
         // STRUCT_FIELDS
         ("STRUCT_FIELDS", "{IDENT} : {TYPE}"),
@@ -251,6 +311,12 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("MUTUAL_DECLS", "  {DEF_DECL}\n  {DEF_DECL}\n  {DEF_DECL}"),
         ("MUTUAL_DECLS", "  {INDUCTIVE_DECL}\n  {INDUCTIVE_DECL}"),
         ("MUTUAL_DECLS", "  {THEOREM_DECL}\n  {THEOREM_DECL}"),
+        // 3-way mutual inductives
+        ("MUTUAL_DECLS", "  {INDUCTIVE_DECL}\n  {INDUCTIVE_DECL}\n  {INDUCTIVE_DECL}"),
+        // Mixed inductive + def mutual blocks
+        ("MUTUAL_DECLS", "  {INDUCTIVE_DECL}\n  {DEF_DECL}"),
+        ("MUTUAL_DECLS", "  {DEF_DECL}\n  {INDUCTIVE_DECL}\n  {DEF_DECL}"),
+        ("MUTUAL_DECLS", "  {THEOREM_DECL}\n  {DEF_DECL}\n  {THEOREM_DECL}"),
 
         // SECTION_BLOCK
         ("SECTION_BLOCK", "section {IDENT}\n{DECL}\nend {IDENT}"),
@@ -265,6 +331,88 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("EVAL_CMD", "#reduce {TERM}"),
         ("EVAL_CMD", "#print {IDENT}"),
         ("EVAL_CMD", "#print axioms {IDENT}"),
+
+        // ================================================================
+        // 2b. ATTRIBUTED DECLARATIONS
+        // ================================================================
+
+        // ATTR_DECL — declarations with attributes that affect automation/reduction
+        ("ATTR_DECL", "@[simp] theorem {IDENT} : {PROP_TYPE} := {PROOF_TERM}"),
+        ("ATTR_DECL", "@[simp] theorem {IDENT} {BINDERS} : {PROP_TYPE} := {PROOF_TERM}"),
+        ("ATTR_DECL", "@[reducible] def {IDENT} : {TYPE} := {TERM}"),
+        ("ATTR_DECL", "@[simp, reducible] def {IDENT} : {TYPE} := {TERM}"),
+        ("ATTR_DECL", "@[ext] theorem {IDENT} : {PROP_TYPE} := {PROOF_TERM}"),
+        ("ATTR_DECL", "@[instance] def {IDENT} : {IDENT_IND} {TYPE_ATOM} := {TERM}"),
+        ("ATTR_DECL", "@[default_instance] instance : {IDENT_IND} {TYPE_ATOM} where\n  {INSTANCE_FIELDS}"),
+        ("ATTR_DECL", "@[inline] def {IDENT} : {TYPE} := {TERM}"),
+        ("ATTR_DECL", "@[simp] def {IDENT} : {TYPE} := {TERM}"),
+        ("ATTR_DECL", "@[reducible, inline] def {IDENT} {BINDERS} : {TYPE} := {TERM}"),
+        ("ATTR_DECL", "@[simp] abbrev {IDENT} : {TYPE} := {TERM}"),
+        ("ATTR_DECL", "@[irreducible] def {IDENT} : {TYPE} := {TERM}"),
+
+        // ================================================================
+        // 2c. NOTATION DECLARATIONS
+        // ================================================================
+
+        // NOTATION_DECL — custom notation/syntax (can confuse parser/elaborator)
+        ("NOTATION_DECL", "notation \"{IDENT}_not\" => {TERM}"),
+        ("NOTATION_DECL", "infixl:65 \" ⊕ \" => fun {IDENT} {IDENT} => {TERM}"),
+        ("NOTATION_DECL", "infixr:70 \" ⊗ \" => fun {IDENT} {IDENT} => {TERM}"),
+        ("NOTATION_DECL", "prefix:100 \"♯\" => fun {IDENT} => {TERM}"),
+        ("NOTATION_DECL", "postfix:100 \"†\" => fun {IDENT} => {TERM}"),
+        ("NOTATION_DECL", "scoped notation \"{IDENT}_scnot\" => {TERM}"),
+        ("NOTATION_DECL", "local notation \"{IDENT}_lcnot\" => {TERM}"),
+        ("NOTATION_DECL", "syntax \"{IDENT}_syn\" : term"),
+
+        // ================================================================
+        // 2d. SCOPED DECLARATIONS
+        // ================================================================
+
+        // SCOPED_DECL — scoped/local instances and attributes
+        ("SCOPED_DECL", "scoped instance : {IDENT_IND} {TYPE_ATOM} where\n  {INSTANCE_FIELDS}"),
+        ("SCOPED_DECL", "local instance : {IDENT_IND} {TYPE_ATOM} where\n  {INSTANCE_FIELDS}"),
+        ("SCOPED_DECL", "attribute [{ATTR_NAME}] {IDENT}"),
+        ("SCOPED_DECL", "local attribute [{ATTR_NAME}] {IDENT}"),
+        ("SCOPED_DECL", "scoped instance : {IDENT_IND} {TYPE_ATOM} := {TERM}"),
+
+        // ATTR_NAME — attribute names for attribute commands
+        ("ATTR_NAME", "simp"),
+        ("ATTR_NAME", "reducible"),
+        ("ATTR_NAME", "irreducible"),
+        ("ATTR_NAME", "instance"),
+        ("ATTR_NAME", "inline"),
+
+        // ================================================================
+        // 2e. DERIVING DECLARATIONS
+        // ================================================================
+
+        // DERIVE_DECL — deriving instances (generated instances)
+        ("DERIVE_DECL", "deriving instance {DERIVE_CLASS} for {IDENT_IND}"),
+        ("DERIVE_DECL", "deriving instance {DERIVE_CLASS}, {DERIVE_CLASS} for {IDENT_IND}"),
+
+        // DERIVE_CLASS — derivable type classes
+        ("DERIVE_CLASS", "Repr"),
+        ("DERIVE_CLASS", "BEq"),
+        ("DERIVE_CLASS", "DecidableEq"),
+        ("DERIVE_CLASS", "Hashable"),
+        ("DERIVE_CLASS", "Inhabited"),
+        ("DERIVE_CLASS", "Ord"),
+
+        // ================================================================
+        // 2f. SET_OPTION COMMANDS
+        // ================================================================
+
+        // OPTION_CMD — set_option commands that affect checking behavior
+        ("OPTION_CMD", "set_option maxRecDepth 128"),
+        ("OPTION_CMD", "set_option maxRecDepth 8"),
+        ("OPTION_CMD", "set_option maxRecDepth 1024"),
+        ("OPTION_CMD", "set_option maxHeartbeats 400000"),
+        ("OPTION_CMD", "set_option maxHeartbeats 0"),
+        ("OPTION_CMD", "set_option autoImplicit false"),
+        ("OPTION_CMD", "set_option autoImplicit true"),
+        ("OPTION_CMD", "set_option relaxedAutoImplicit true"),
+        ("OPTION_CMD", "set_option maxRecDepth 128 in\n{DECL}"),
+        ("OPTION_CMD", "set_option maxHeartbeats 400000 in\n{DECL}"),
 
         // ================================================================
         // 3. UNIVERSE LEVELS (targets kernel/level.cpp)
@@ -283,6 +431,13 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("ULEVEL", "imax ({ULEVEL} + 1) ({ULEVEL} + 1)"),
         ("ULEVEL", "max (max {ULEVEL} {ULEVEL}) {ULEVEL}"),
         ("ULEVEL", "imax {ULEVEL} (imax {ULEVEL} {ULEVEL})"),
+        // Edge cases targeting imax special behavior (imax u 0 = 0)
+        ("ULEVEL", "imax 0 {UVAR}"),
+        ("ULEVEL", "imax {UVAR} 0"),
+        ("ULEVEL", "imax 0 0"),
+        ("ULEVEL", "max 0 {ULEVEL}"),
+        ("ULEVEL", "imax (imax {ULEVEL} 0) {ULEVEL}"),
+        ("ULEVEL", "imax {ULEVEL} (max 0 0)"),
 
         // UVAR — universe variable names (small pool for reuse)
         ("UVAR", "u"),
@@ -304,6 +459,11 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("ULEVEL_ANNOT", "Sort 0"),
         ("ULEVEL_ANNOT", "Sort 1"),
         ("ULEVEL_ANNOT", "Prop"),
+        // imax-based sort annotations (stress kernel/level.cpp)
+        ("ULEVEL_ANNOT", "Sort (imax {UVAR} 0)"),
+        ("ULEVEL_ANNOT", "Sort (imax 0 {UVAR})"),
+        ("ULEVEL_ANNOT", "Type (imax {UVAR} 0)"),
+        ("ULEVEL_ANNOT", "Sort (max {UVAR} {UVAR})"),
 
         // ================================================================
         // 4. TYPES
@@ -712,11 +872,23 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("ELAB_DECL", "elab \"{IDENT}_term\" : term => do\n  return Lean.mkConst ``True"),
         ("ELAB_DECL", "elab \"{IDENT}_tactic\" : tactic => do\n  Lean.Elab.Tactic.evalTactic (← `(tactic| trivial))"),
         ("ELAB_DECL", "elab \"{IDENT}_cmd\" : command => do\n  let env ← Lean.Elab.Command.getEnv\n  let some info := env.find? `{IDENT}\n    | throwError \"not found\"\n  Lean.logInfo s!\"found: \\{info.name\\}\""),
+        // Environment manipulation elaborators
+        ("ELAB_DECL", "elab \"{IDENT}_term\" : term => do\n  return Lean.mkConst ``False"),
+        ("ELAB_DECL", "elab \"{IDENT}_cmd\" : command => do\n  Lean.Elab.Command.liftTermElabM do\n    let env ← Lean.getEnv\n    Lean.logInfo s!\"decls: \\{env.constants.size\\}\""),
+        // Term elaborator returning mkApp
+        ("ELAB_DECL", "elab \"{IDENT}_term\" : term => do\n  let t ← Lean.Elab.Term.elabTerm (← `(True)) none\n  return t"),
 
         // MACRO_DECL — syntax macros
         ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `({TERM})"),
         ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `(by trivial)"),
         ("MACRO_DECL", "macro \"{IDENT}_mac\" : command => `(#check {TERM})"),
+        // sorry macro (can it be used to bypass checks?)
+        ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `(sorry)"),
+        // inferInstance macro
+        ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `(inferInstance)"),
+        // Macro expanding to complex term
+        ("MACRO_DECL", "macro \"{IDENT}_mac\" : term => `(show {TYPE} from {TERM})"),
+        ("MACRO_DECL", "macro \"{IDENT}_mac\" : tactic => `(tactic| simp_all)"),
     ]
 }
 
@@ -733,22 +905,34 @@ fn prefix_rules_raw() -> Vec<(&'static str, &'static str)> {
         "PROOF_TERM", "TACTIC", "TACTIC_SEQ", "CONV_TACTIC", "CASE_ARMS", "RCASES_PAT",
     ];
 
-    // TERM expansions that reference removed nonterminals.
-    const REMOVED_TERM_EXPANSIONS: &[&str] = &[
-        "have {IDENT} : {PROP_TYPE} := {PROOF_TERM}\n{TERM}",
-        "by {TACTIC}",
-        "by\n  {TACTIC_SEQ}",
-    ];
+    /// Check if an expansion references any of the removed nonterminals.
+    fn refs_removed(exp: &str) -> bool {
+        for nt in REMOVED_NTS {
+            // Look for `{NT}` (not escaped `\{`)
+            let pattern = format!("{{{nt}}}");
+            if exp.contains(&pattern) {
+                return true;
+            }
+        }
+        false
+    }
 
     let mut rules: Vec<(&str, &str)> = rules_raw()
         .into_iter()
         .filter(|(nt, exp)| {
             // Remove all rules where the nonterminal is a proof-related one.
-            !REMOVED_NTS.contains(nt)
+            if REMOVED_NTS.contains(nt) {
+                return false;
+            }
             // Remove full-grammar THEOREM_DECL (replaced below with sorry variants).
-            && *nt != "THEOREM_DECL"
-            // Remove specific TERM rules that reference proof nonterminals.
-            && !(*nt == "TERM" && REMOVED_TERM_EXPANSIONS.contains(exp))
+            if *nt == "THEOREM_DECL" {
+                return false;
+            }
+            // Remove any rule whose expansion references a removed nonterminal.
+            if refs_removed(exp) {
+                return false;
+            }
+            true
         })
         .collect();
 
@@ -756,6 +940,10 @@ fn prefix_rules_raw() -> Vec<(&'static str, &'static str)> {
     rules.push(("THEOREM_DECL", "theorem {IDENT} : {PROP_TYPE} := sorry"));
     rules.push(("THEOREM_DECL", "theorem {IDENT} {BINDERS} : {PROP_TYPE} := sorry"));
     rules.push(("THEOREM_DECL", "@[simp] theorem {IDENT} : {PROP_TYPE} := sorry"));
+    // Attributed theorem declarations for prefix mode.
+    rules.push(("ATTR_DECL", "@[simp] theorem {IDENT} : {PROP_TYPE} := sorry"));
+    rules.push(("ATTR_DECL", "@[simp] theorem {IDENT} {BINDERS} : {PROP_TYPE} := sorry"));
+    rules.push(("ATTR_DECL", "@[ext] theorem {IDENT} : {PROP_TYPE} := sorry"));
 
     rules
 }
@@ -904,8 +1092,8 @@ mod tests {
     fn rule_count_regression() {
         let count = rules_raw().len();
         assert_eq!(
-            count, 502,
-            "expected exactly 502 rules, got {count} — was a rule accidentally added or removed?"
+            count, 613,
+            "expected exactly 613 rules, got {count} — was a rule accidentally added or removed?"
         );
     }
 
@@ -923,6 +1111,9 @@ mod tests {
             "ULEVEL",
             "IDENT", "IDENT_IND", "IDENT_CTOR",
             "ELAB_DECL", "MACRO_DECL",
+            "ATTR_DECL", "NOTATION_DECL", "SCOPED_DECL",
+            "DERIVE_DECL", "OPTION_CMD",
+            "ATTR_NAME", "DERIVE_CLASS",
         ];
 
         for &cat in &required {
@@ -969,8 +1160,8 @@ mod tests {
     fn prefix_rule_count_regression() {
         let count = prefix_rules_raw().len();
         assert_eq!(
-            count, 393,
-            "expected exactly 393 prefix rules, got {count} — was a rule accidentally added or removed?"
+            count, 504,
+            "expected exactly 504 prefix rules, got {count} — was a rule accidentally added or removed?"
         );
     }
 
