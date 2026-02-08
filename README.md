@@ -30,3 +30,12 @@ git clone https://github.com/leanprover/lean4.git lean4
 ```
 This is gitignored and used only for searching the compiler source.
 
+## Running in Parallel
+
+For faster execution, run multiple instances:
+```bash
+./run_parallel.sh 4 10  # 4 workers, depth 10
+```
+
+Achieves ~4x speedup. Each instance is fully isolated with temp directories.
+
