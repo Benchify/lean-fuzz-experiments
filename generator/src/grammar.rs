@@ -1,16 +1,38 @@
 /// Lean 4 grammar for LibAFL Nautilus grammar-based mutation.
 ///
-/// ~420 rules across 55 non-terminals targeting kernel soundness bugs:
+/// ~500 rules across 55 non-terminals targeting kernel soundness bugs:
 /// universe levels, inductive types, definitional equality, termination
 /// checking, type class resolution, and metaprogramming.
 ///
 /// Escaping: `\{` and `\}` produce literal braces in output (Lean implicit
 /// binders). `{NT}` references a non-terminal for Nautilus expansion.
+///
+/// Two grammar variants are available:
+/// - **Full grammar** (`lean4_rules`): All rules including proof terms and
+///   tactics. Used for standalone file generation.
+/// - **Prefix grammar** (`lean4_prefix_rules`): Declarations only — no
+///   proof terms, tactics, or tactic sequences. Theorems use `sorry` as a
+///   placeholder. Designed for the "poisoned prefix" fuzzing pipeline where
+///   the scaffold appends fixed golden suffixes (`theorem : False := by ...`).
+///
+/// The prefix grammar removes ~22% of rules, focusing 100% of mutation
+/// budget on environment-corrupting declarations rather than proof search.
 
 /// Returns all grammar rules as `Vec<Vec<String>>` where each inner vec
 /// is `[nonterminal, expansion]`.
 pub fn lean4_rules() -> Vec<Vec<String>> {
     rules_raw().into_iter().map(|(nt, exp)| {
+        vec![nt.to_string(), exp.to_string()]
+    }).collect()
+}
+
+/// Returns the prefix-only grammar rules (no proof terms, tactics, or
+/// tactic sequences). Theorems use `sorry` as placeholder proofs.
+///
+/// This is the grammar used by the scaffold's `fuzz` command: the generator
+/// outputs prefix-only code, and the scaffold appends golden suffixes.
+pub fn lean4_prefix_rules() -> Vec<Vec<String>> {
+    prefix_rules_raw().into_iter().map(|(nt, exp)| {
         vec![nt.to_string(), exp.to_string()]
     }).collect()
 }
@@ -37,7 +59,8 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("PREAMBLE", "{UNIVERSE_DECLS}"),
         ("PREAMBLE", ""),
 
-        // IMPORTS
+        // IMPORTS — only `import Lean*` to match template/lakefile.toml dependencies.
+        // The template project declares `require Lean` so only Lean-prefixed imports resolve.
         ("IMPORTS", "import Lean"),
         ("IMPORTS", "import Lean\nimport Lean.Elab.Command"),
         ("IMPORTS", "import Lean\nimport Lean.Meta"),
@@ -98,7 +121,12 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("DEF_DECL", "private def {IDENT} : {TYPE} := {TERM}"),
         ("DEF_DECL", "protected def {IDENT} : {TYPE} := {TERM}"),
 
-        // THEOREM_DECL
+        // THEOREM_DECL — full grammar includes proof terms and tactic blocks.
+        // In prefix-only mode these are replaced with `sorry`-based variants,
+        // since the scaffold appends its own golden suffixes for proof search.
+        // Prefix theorems with `sorry` build up a "library" of lemmas that
+        // golden suffix automation might leverage (transitively checked via
+        // `#print axioms` to filter false positives).
         ("THEOREM_DECL", "theorem {IDENT} : {PROP_TYPE} := {PROOF_TERM}"),
         ("THEOREM_DECL", "theorem {IDENT} {BINDERS} : {PROP_TYPE} := {PROOF_TERM}"),
         ("THEOREM_DECL", "theorem {IDENT} : {PROP_TYPE} := by\n  {TACTIC_SEQ}"),
@@ -692,6 +720,46 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
+/// Prefix-only grammar: filters `rules_raw()` to remove proof-related
+/// nonterminals and replace theorem declarations with sorry-based variants.
+///
+/// Contract with the scaffold:
+/// - Generator stdout = raw prefix code (declarations only, may contain `sorry`)
+/// - Scaffold appends golden suffixes (`theorem : False := by <tactic>`)
+/// - Oracle checks: did `lake build` succeed? + `#print axioms` for `sorryAx`
+fn prefix_rules_raw() -> Vec<(&'static str, &'static str)> {
+    // Nonterminals that exist only for proof construction — removed entirely.
+    const REMOVED_NTS: &[&str] = &[
+        "PROOF_TERM", "TACTIC", "TACTIC_SEQ", "CONV_TACTIC", "CASE_ARMS", "RCASES_PAT",
+    ];
+
+    // TERM expansions that reference removed nonterminals.
+    const REMOVED_TERM_EXPANSIONS: &[&str] = &[
+        "have {IDENT} : {PROP_TYPE} := {PROOF_TERM}\n{TERM}",
+        "by {TACTIC}",
+        "by\n  {TACTIC_SEQ}",
+    ];
+
+    let mut rules: Vec<(&str, &str)> = rules_raw()
+        .into_iter()
+        .filter(|(nt, exp)| {
+            // Remove all rules where the nonterminal is a proof-related one.
+            !REMOVED_NTS.contains(nt)
+            // Remove full-grammar THEOREM_DECL (replaced below with sorry variants).
+            && *nt != "THEOREM_DECL"
+            // Remove specific TERM rules that reference proof nonterminals.
+            && !(*nt == "TERM" && REMOVED_TERM_EXPANSIONS.contains(exp))
+        })
+        .collect();
+
+    // Sorry-based theorem declarations for prefix mode.
+    rules.push(("THEOREM_DECL", "theorem {IDENT} : {PROP_TYPE} := sorry"));
+    rules.push(("THEOREM_DECL", "theorem {IDENT} {BINDERS} : {PROP_TYPE} := sorry"));
+    rules.push(("THEOREM_DECL", "@[simp] theorem {IDENT} : {PROP_TYPE} := sorry"));
+
+    rules
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -889,6 +957,125 @@ mod tests {
             assert!(
                 actual >= min,
                 "{nt} has only {actual} rules, expected at least {min} for diversity"
+            );
+        }
+    }
+
+    // ================================================================
+    // PREFIX GRAMMAR TESTS
+    // ================================================================
+
+    #[test]
+    fn prefix_rule_count_regression() {
+        let count = prefix_rules_raw().len();
+        assert_eq!(
+            count, 393,
+            "expected exactly 393 prefix rules, got {count} — was a rule accidentally added or removed?"
+        );
+    }
+
+    #[test]
+    fn prefix_no_proof_nonterminals() {
+        let raw = prefix_rules_raw();
+        let removed = ["PROOF_TERM", "TACTIC", "TACTIC_SEQ", "CONV_TACTIC", "CASE_ARMS", "RCASES_PAT"];
+
+        // None of these should appear as defined nonterminals.
+        for (nt, _) in &raw {
+            assert!(
+                !removed.contains(nt),
+                "prefix grammar still defines removed nonterminal {nt}"
+            );
+        }
+
+        // None of these should be referenced in any expansion either.
+        for (nt, expansion) in &raw {
+            for ref_nt in extract_nt_refs(expansion) {
+                assert!(
+                    !removed.contains(&ref_nt.as_str()),
+                    "prefix grammar rule ({nt}) references removed nonterminal {{{ref_nt}}} in: {expansion}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prefix_all_nonterminals_reachable_from_file() {
+        let raw = prefix_rules_raw();
+
+        let mut adj: HashMap<&str, HashSet<String>> = HashMap::new();
+        let defined: HashSet<&str> = raw.iter().map(|(nt, _)| *nt).collect();
+        for (nt, expansion) in &raw {
+            let refs = extract_nt_refs(expansion);
+            adj.entry(nt).or_default().extend(refs);
+        }
+
+        let mut visited: HashSet<&str> = HashSet::new();
+        let mut queue: VecDeque<&str> = VecDeque::new();
+        queue.push_back("FILE");
+        visited.insert("FILE");
+
+        while let Some(current) = queue.pop_front() {
+            if let Some(neighbors) = adj.get(current) {
+                for neighbor in neighbors {
+                    if let Some(&defined_nt) = defined.iter().find(|&&d| d == neighbor.as_str()) {
+                        if visited.insert(defined_nt) {
+                            queue.push_back(defined_nt);
+                        }
+                    }
+                }
+            }
+        }
+
+        let unreachable: Vec<&str> = defined.iter()
+            .filter(|nt| !visited.contains(**nt))
+            .copied()
+            .collect();
+        assert!(
+            unreachable.is_empty(),
+            "prefix grammar: unreachable nonterminals from FILE: {unreachable:?}"
+        );
+    }
+
+    #[test]
+    fn prefix_no_orphan_nonterminals() {
+        let raw = prefix_rules_raw();
+        let defined: HashSet<&str> = raw.iter().map(|(nt, _)| *nt).collect();
+
+        for (i, (nt, expansion)) in raw.iter().enumerate() {
+            for ref_nt in extract_nt_refs(expansion) {
+                assert!(
+                    defined.contains(ref_nt.as_str()),
+                    "prefix rule {i} ({nt}): references undefined nonterminal {{{ref_nt}}}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prefix_first_rule_is_file() {
+        let rules = lean4_prefix_rules();
+        assert_eq!(
+            rules[0][0], "FILE",
+            "prefix grammar: first rule must define FILE (Nautilus auto-wraps in START)"
+        );
+    }
+
+    #[test]
+    fn prefix_theorems_use_sorry() {
+        let raw = prefix_rules_raw();
+        let theorem_rules: Vec<_> = raw.iter()
+            .filter(|(nt, _)| *nt == "THEOREM_DECL")
+            .collect();
+
+        assert!(!theorem_rules.is_empty(), "prefix grammar must have THEOREM_DECL rules");
+        for (_, exp) in &theorem_rules {
+            assert!(
+                exp.contains("sorry"),
+                "prefix THEOREM_DECL must use sorry, got: {exp}"
+            );
+            assert!(
+                !exp.contains("PROOF_TERM") && !exp.contains("TACTIC"),
+                "prefix THEOREM_DECL must not reference proof nonterminals: {exp}"
             );
         }
     }
