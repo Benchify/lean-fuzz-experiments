@@ -20,3 +20,5 @@ generator/solutions/
 lean4/
 
 artifacts/stress_gen
+artifacts/generator-failures
+artifacts/golden-signals
