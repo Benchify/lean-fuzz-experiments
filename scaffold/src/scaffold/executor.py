@@ -5,6 +5,7 @@ Each prefix is assembled with golden suffixes and run through `lake build`.
 """
 
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -161,26 +162,60 @@ def execute_prefix(
     return PrefixResult(prefix=prefix, results=results)
 
 
-def find_gen_sample() -> Path:
-    """Locate the gen-sample binary, preferring release over debug."""
-    target = MONOREPO / "generator" / "target"
-    for profile in ("release", "debug"):
-        candidate = target / profile / "gen-sample"
-        if candidate.exists():
-            return candidate
-    msg = "gen-sample binary not found. Run: cargo build --bin gen-sample"
-    raise FileNotFoundError(msg)
+GENERATOR_DIR = MONOREPO / "generator"
 
 
-def run_gen_sample(bin_path: Path, depth: int = 15) -> str:
-    """Call gen-sample and return the generated Lean code."""
+def run_gen_sample(depth: int = 15, *, prefix_only: bool = True) -> str:
+    """Generate a Lean code sample via ``cargo run --bin gen_sample``.
+
+    Uses ``cargo run`` so the binary is automatically rebuilt when the
+    Rust source changes — no stale-build issues.
+
+    Args:
+        depth: Nautilus tree depth (higher = deeper nesting).
+        prefix_only: Use prefix-only grammar (no proof terms/tactics).
+            Default True for the scaffold pipeline where golden suffixes
+            are appended separately.
+    """
+    cmd = ["cargo", "run", "--bin", "gen_sample", "--"]
+    if prefix_only:
+        cmd.append("--prefix-only")
+    cmd.append(str(depth))
     result = subprocess.run(
-        [str(bin_path), str(depth)],
+        cmd,
+        cwd=str(GENERATOR_DIR),
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
     )
     if result.returncode != 0:
-        msg = f"gen-sample failed: {result.stderr}"
+        msg = f"gen_sample failed: {result.stderr}"
         raise RuntimeError(msg)
     return result.stdout
+
+
+# Patterns that indicate a prefix contains proof content that should have
+# been stripped by the prefix-only grammar. These are warnings, not errors —
+# hardcoded tactic strings in ELAB_DECL/MACRO_DECL are expected.
+_PREFIX_WARN_PATTERNS = [
+    (re.compile(r":=\s*by\b"), "tactic proof block (`:= by`)"),
+    (
+        re.compile(r"theorem\s+\w+[^:]*:\s*False\s*:=\s+(?!sorry\b)\S"),
+        "non-sorry False theorem",
+    ),
+    (re.compile(r"#print\s+axioms\b"), "#print axioms command"),
+]
+
+
+def validate_prefix(prefix: str) -> list[str]:
+    """Check a prefix for content that conflicts with the scaffold contract.
+
+    Returns a list of warning strings (empty = clean prefix). These are
+    advisory — some patterns (e.g. `by trivial` inside macro/elab decls)
+    are harmless but flagged for visibility.
+    """
+    warnings: list[str] = []
+    for pattern, description in _PREFIX_WARN_PATTERNS:
+        if pattern.search(prefix):
+            warnings.append(f"prefix contains {description}")
+    return warnings
