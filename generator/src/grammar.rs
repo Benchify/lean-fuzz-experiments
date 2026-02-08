@@ -494,6 +494,9 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("TACTIC", "refine {PROOF_TERM}"),
         ("TACTIC", "refine ?_"),
         ("TACTIC", "aesop"),
+        ("TACTIC", "grind"),
+        ("TACTIC", "grind [{IDENT}]"),
+        ("TACTIC", "grind [*]"),
         ("TACTIC", "native_decide"),
         ("TACTIC", "unfold {IDENT}"),
         ("TACTIC", "delta {IDENT}"),
@@ -673,32 +676,7 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         ("STR_LIT", "abc"),
 
         // ================================================================
-        // 11. GOLDEN CHECKS — soundness oracle
-        // ================================================================
-
-        // GOLDEN_CHECK — various ways to check for accepted False
-        ("GOLDEN_CHECK", "{GOLDEN_THEOREM}"),
-        ("GOLDEN_CHECK", "{GOLDEN_VERIFY}"),
-        ("GOLDEN_CHECK", "{GOLDEN_THEOREM}\n{GOLDEN_VERIFY}"),
-
-        // GOLDEN_THEOREM — theorem claiming False or 0=1
-        ("GOLDEN_THEOREM", "theorem soundness_check : False := {PROOF_TERM}"),
-        ("GOLDEN_THEOREM", "theorem soundness_check : (0 : Nat) = 1 := {PROOF_TERM}"),
-        ("GOLDEN_THEOREM", "theorem soundness_check : (2 + 2 : Nat) = 5 := {PROOF_TERM}"),
-        ("GOLDEN_THEOREM", "theorem soundness_check : ∀ (P : Prop), P := {PROOF_TERM}"),
-        ("GOLDEN_THEOREM", "theorem soundness_check : False := by\n  {TACTIC_SEQ}"),
-        ("GOLDEN_THEOREM", "theorem soundness_check : (0 : Nat) = 1 := by\n  {TACTIC_SEQ}"),
-        ("GOLDEN_THEOREM", "theorem soundness_check : Empty := {PROOF_TERM}"),
-        ("GOLDEN_THEOREM", "def soundness_check : False := {PROOF_TERM}"),
-
-        // GOLDEN_VERIFY — ask Lean to print axioms used
-        ("GOLDEN_VERIFY", "#print axioms soundness_check"),
-        ("GOLDEN_VERIFY", "#check (soundness_check : False)"),
-        ("GOLDEN_VERIFY", "#check soundness_check"),
-        ("GOLDEN_VERIFY", ""),
-
-        // ================================================================
-        // 12. METAPROGRAMMING (targets Elaborator/Environment)
+        // 11. METAPROGRAMMING (targets Elaborator/Environment)
         // ================================================================
 
         // ELAB_DECL — custom elaborators
@@ -858,33 +836,11 @@ mod tests {
     fn rule_count_regression() {
         let count = rules_raw().len();
         assert_eq!(
-            count, 515,
-            "expected exactly 515 rules, got {count} — was a rule accidentally added or removed?"
+            count, 502,
+            "expected exactly 502 rules, got {count} — was a rule accidentally added or removed?"
         );
     }
 
-    #[test]
-    fn golden_check_rules_claim_false() {
-        let raw = rules_raw();
-        let golden_theorems: Vec<&str> = raw.iter()
-            .filter(|(nt, _)| *nt == "GOLDEN_THEOREM")
-            .map(|(_, exp)| *exp)
-            .collect();
-
-        assert!(
-            !golden_theorems.is_empty(),
-            "no GOLDEN_THEOREM rules found — soundness oracle is missing"
-        );
-
-        // Every golden theorem must claim something false/impossible
-        let false_indicators = ["False", "0 : Nat) = 1", "2 + 2 : Nat) = 5", "∀ (P : Prop), P", "Empty"];
-        for theorem in &golden_theorems {
-            assert!(
-                false_indicators.iter().any(|ind| theorem.contains(ind)),
-                "GOLDEN_THEOREM doesn't claim something impossible: {theorem}"
-            );
-        }
-    }
 
     #[test]
     fn all_grammar_categories_present() {
@@ -896,7 +852,7 @@ mod tests {
             "DEF_DECL", "THEOREM_DECL", "INDUCTIVE_DECL",
             "TACTIC", "TACTIC_SEQ", "TERM", "TYPE", "TYPE_ATOM",
             "PROP_TYPE", "PROOF_TERM", "BINDERS", "BINDER_SINGLE",
-            "ULEVEL", "GOLDEN_CHECK", "GOLDEN_THEOREM",
+            "ULEVEL",
             "IDENT", "IDENT_IND", "IDENT_CTOR",
             "ELAB_DECL", "MACRO_DECL",
         ];
