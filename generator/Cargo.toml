@@ -9,11 +9,11 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "generator"
-path = "src/main.rs"
+path = "src/bin/main.rs"
 
 [[bin]]
 name = "gen-sample"
-path = "src/gen_sample.rs"
+path = "src/bin/gen_sample.rs"
 
 [dependencies]
 libafl = { version = "0.15.4", features = ["nautilus"] }
