@@ -251,6 +251,30 @@ def fuzz(
     """Generate prefixes via gen-sample and test against golden suffixes."""
     import signal
     import time
+
+    # Setup graceful shutdown on Ctrl+C
+    shutdown_flag = {"triggered": False}
+    tier_counts_ref = None  # Will be set later for signal handler access
+
+    def signal_handler(sig, frame):
+        if not shutdown_flag["triggered"]:
+            shutdown_flag["triggered"] = True
+            typer.echo("\n\n⚠️  Ctrl+C detected - saving reports...")
+            # Print tier distribution if available
+            if tier_counts_ref:
+                typer.echo("\n📊 Current tier distribution:")
+                for tier_name in ["tier-0", "tier-1", "tier-2", "discard"]:
+                    count = tier_counts_ref.get(tier_name, 0)
+                    if count > 0:
+                        icon = "🎯" if tier_name == "tier-0" else ""
+                        typer.echo(f"   {tier_name:10s} {count:4d} {icon}")
+            typer.echo("\n   Finishing up... (Press Ctrl+C again to force quit)")
+        else:
+            typer.echo("\n\n🛑 Force quit")
+            raise typer.Exit(1)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
     _setup_logging(verbose)
 
     # Parse duration if provided
@@ -280,6 +304,7 @@ def fuzz(
     error_counter: Counter[ErrorCategory] = Counter()
     corpus_dir = (campaign_dir / "corpus" if campaign_dir else MONOREPO / "artifacts" / "corpus") if corpus else None
     tier_counts: Counter[str] = Counter()
+    tier_counts_ref = tier_counts  # Make available to signal handler
     tier_0_prefixes: list[tuple[str, str]] = []  # (prefix_hash, prefix_code) for near-misses
 
     # Generate prefixes incrementally (allows duration limits and checkpoints)
@@ -314,6 +339,11 @@ def fuzz(
     with ThreadPoolExecutor(max_workers=pool_size) as executor:
         futures = {executor.submit(_test_one, i, p): i for i, p in enumerate(prefixes)}
         for future in as_completed(futures):
+            # Check for Ctrl+C
+            if shutdown_flag["triggered"]:
+                typer.echo("\n📊 Saving reports before exit...")
+                break
+
             idx, result = future.result()
             tested_count += 1
 
@@ -429,12 +459,26 @@ def fuzz(
         if corpus_dir:
             typer.echo(f"\nTiered corpus saved to {corpus_dir}")
 
-    if campaign_dir:
-        typer.echo(f"\n📁 Campaign artifacts in {campaign_dir}")
+    # Show where to find results
+    typer.echo(f"\n{'='*60}")
+    typer.echo(f"📁 CAMPAIGN RESULTS")
+    typer.echo(f"{'='*60}")
 
-    # Show checkpoints saved
-    if checkpoint_count > 0:
-        typer.echo(f"💾 {checkpoint_count} checkpoints saved")
+    if campaign_dir:
+        typer.echo(f"\n📂 Campaign directory: {campaign_dir}")
+        typer.echo(f"   ├── summary.md       (overview and statistics)")
+        typer.echo(f"   ├── near-misses.md   (top Tier 0 prefixes)")
+        typer.echo(f"   ├── corpus/tier-*/   (tiered prefix corpus)")
+        if checkpoint_count > 0:
+            typer.echo(f"   ├── checkpoints/     ({checkpoint_count} saved)")
+        if diag_logger:
+            typer.echo(f"   └── {diag_logger.log_path.name}  (raw diagnostic log)")
+    elif diag_logger:
+        typer.echo(f"\n📄 Diagnostics: {diag_logger.log_path}")
+        summary_path = diag_logger.log_path.with_suffix('.md')
+        typer.echo(f"📄 Summary: {summary_path}")
+
+    typer.echo(f"\n{'='*60}")
 
 
 @app.command()

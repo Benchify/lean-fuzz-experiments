@@ -42,6 +42,7 @@ const TARGET_FILE: &str = "../template/Solution.lean";
 #[derive(Debug)]
 struct VerifierStats {
     counters: [AtomicUsize; 8],  // One for each (lake, comp, safe) combination
+    seen: [AtomicUsize; 8],      // Track which combinations we've seen (for immediate notification)
     last_print: Mutex<Instant>,
     start_time: Instant,
 }
@@ -50,6 +51,7 @@ impl VerifierStats {
     fn new() -> Self {
         Self {
             counters: Default::default(),
+            seen: Default::default(),
             last_print: Mutex::new(Instant::now()),
             start_time: Instant::now(),
         }
@@ -57,7 +59,23 @@ impl VerifierStats {
 
     fn record(&self, lake: bool, comp: bool, safe: bool) {
         let idx = (lake as usize) << 2 | (comp as usize) << 1 | (safe as usize);
-        self.counters[idx].fetch_add(1, Ordering::Relaxed);
+        let count = self.counters[idx].fetch_add(1, Ordering::Relaxed);
+
+        // If this is the first time seeing this combination, notify immediately!
+        if count == 0 && self.seen[idx].fetch_add(1, Ordering::Relaxed) == 0 {
+            let (l, c, s) = (
+                if lake { "PASS" } else { "FAIL" },
+                if comp { "PASS" } else { "FAIL" },
+                if safe { "PASS" } else { "FAIL" },
+            );
+            let note = match (lake, comp, safe) {
+                (true, true, true) => " 🎯🎯🎯 ULTIMATE!",
+                (true, true, false) => " !!! GOLDEN",
+                (true, false, true) => " ?! DIVERGENCE",
+                _ => "",
+            };
+            println!("\n🔔 NEW CATEGORY: Lake={} Comp={} Safe={}{}", l, c, s, note);
+        }
     }
 
     fn print_table(&self) {
@@ -271,6 +289,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter_module("libafl_bolts::os::unix_shmem_server", log::LevelFilter::Off)
         .init();
 
+    // Note: Ctrl+C handling is done via catch_unwind in fuzz_loop
+    // Stats will be printed on any exit (normal or signal)
+
     // Load .env file for COMPARATOR_PATH
     let _ = dotenvy::from_filename("../.env").or_else(|_| dotenvy::from_filename(".env"));
 
@@ -447,11 +468,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run the fuzzer
     println!("[*] Starting fuzz loop...");
+    println!("[*] Press Ctrl+C to stop (will save reports gracefully)");
     let fuzz_result = fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr);
 
-    // Print final summary (even on Ctrl+C)
+    // Print final summary (runs on normal exit or Ctrl+C)
     println!("\n[*] Fuzzing campaign ended");
     stats.print_final_summary();
+
+    // Show where to find results
+    println!("\n📁 Results saved to:");
+    println!("   Generator: generator/solutions/lake_*_comp_*_safe_*/");
+    println!("   Scaffold:  artifacts/campaigns/<name>/ (if using scaffold)");
+    println!("\n💡 To analyze scaffold results:");
+    println!("   cd scaffold && uv run scaffold report <session>.jsonl");
 
     fuzz_result?;
     Ok(())
