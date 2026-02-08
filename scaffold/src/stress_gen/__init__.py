@@ -27,29 +27,24 @@ class StressResult(BaseModel):
     timestamp: str
 
 
-def _find_gen_sample() -> Path:
-    """Locate the gen-sample binary, preferring release over debug."""
-    target = MONOREPO / "generator" / "target"
-    for profile in ("release", "debug"):
-        candidate = target / profile / "gen-sample"
-        if candidate.exists():
-            return candidate
-    typer.echo(
-        "gen-sample binary not found. Run: cargo build --bin gen-sample", err=True
-    )
-    raise SystemExit(1)
+GENERATOR_DIR = MONOREPO / "generator"
 
 
-def run_gen_sample(bin_path: Path, depth: int) -> str:
-    """Call gen-sample and return the generated Lean code."""
+def run_gen_sample(depth: int, *, prefix_only: bool = True) -> str:
+    """Generate a Lean code sample via ``cargo run --bin gen_sample``."""
+    cmd = ["cargo", "run", "--bin", "gen_sample", "--"]
+    if prefix_only:
+        cmd.append("--prefix-only")
+    cmd.append(str(depth))
     result = subprocess.run(
-        [str(bin_path), str(depth)],
+        cmd,
+        cwd=str(GENERATOR_DIR),
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
     )
     if result.returncode != 0:
-        typer.echo(f"gen-sample failed: {result.stderr}", err=True)
+        typer.echo(f"gen_sample failed: {result.stderr}", err=True)
         raise SystemExit(1)
     return result.stdout
 
@@ -80,7 +75,6 @@ def _main(
     depth: int = typer.Option(15, help="Nautilus tree depth for generation."),
 ) -> None:
     """Stress-test the Lean grammar generator."""
-    gen_sample_bin = _find_gen_sample()
     template_dir = MONOREPO / "template"
     artifacts_dir = MONOREPO / "artifacts" / "stress_gen"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -97,7 +91,7 @@ def _main(
                 ignore=shutil.ignore_patterns(".lake"),
             )
 
-            code = run_gen_sample(gen_sample_bin, depth)
+            code = run_gen_sample(depth)
             (project_dir / "Template" / "Basic.lean").write_text(code)
 
             exit_code, _stderr = run_lake_build(project_dir)

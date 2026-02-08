@@ -24,8 +24,8 @@ from scaffold.executor import (
     MONOREPO,
     TemplatePool,
     execute_prefix,
-    find_gen_sample,
     run_gen_sample,
+    validate_prefix,
 )
 from scaffold.golden_suffixes import SUFFIX_BY_NAME
 from scaffold.models import ErrorCategory, PrefixResult, Verdict
@@ -284,9 +284,6 @@ def fuzz(
         end_time = time.time() + duration_seconds
         typer.echo(f"Duration limit: {duration} ({duration_seconds}s)")
 
-    gen_sample_bin = find_gen_sample()
-    typer.echo(f"Using gen-sample: {gen_sample_bin}")
-
     pool = TemplatePool(pool_dir=pool_dir, pool_size=pool_size)
     pool.initialize()
     typer.echo(f"Pool ready: {pool_size} slots at {pool_dir}")
@@ -312,15 +309,19 @@ def fuzz(
     prefixes: list[str] = []
     gen_failures = 0
     checkpoint_count = 0
+    fuzz_logger = logging.getLogger("scaffold.fuzz")
 
-    for i in range(iterations):
-        # Check duration limit
+    for _ in range(iterations):
         if end_time and time.time() >= end_time:
             typer.echo(f"\n⏱️  Duration limit reached. Generated {len(prefixes)} prefixes.")
             break
 
         try:
-            prefixes.append(run_gen_sample(gen_sample_bin, depth))
+            prefix = run_gen_sample(depth)
+            warnings = validate_prefix(prefix)
+            for w in warnings:
+                fuzz_logger.debug("prefix validation: %s", w)
+            prefixes.append(prefix)
         except (RuntimeError, subprocess.TimeoutExpired):
             gen_failures += 1
 
