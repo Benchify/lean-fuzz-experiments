@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    name: Rust (build & test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: generator
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            generator/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('generator/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - run: cargo build
+      - run: cargo test
+
+  python-lint:
+    name: Python lint & typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scaffold
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run ty check
+
+  python-test:
+    name: Python tests
+    needs: rust
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scaffold
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            generator/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('generator/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Build generator (for integration tests)
+        run: cargo build
+        working-directory: generator
+
+      - run: uv run pytest
+
+  lean:
+    name: Lean (lake build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: template
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/cache@v4
+        with:
+          path: template/.lake
+          key: lake-${{ runner.os }}-${{ hashFiles('template/lean-toolchain', 'template/lakefile.toml') }}
+          restore-keys: lake-${{ runner.os }}-
+
+      - run: lake build
