@@ -3,6 +3,8 @@ use std::process::Command;
 use std::fs;
 
 use clap::Parser;
+use tempfile::TempDir;
+use fs_extra::dir::CopyOptions;
 use libafl::corpus::{InMemoryCorpus, OnDiskCorpus};
 use libafl::events::SimpleEventManager;
 use libafl::executors::{ExitKind, InProcessExecutor};
@@ -55,14 +57,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("warning: template dir not found at {TEMPLATE_DIR}, using relative path");
             PathBuf::from(TEMPLATE_DIR)
         });
-    let target_file = PathBuf::from(TARGET_FILE)
+    let _target_file = PathBuf::from(TARGET_FILE)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(TARGET_FILE));
-    let template_dir_str = template_dir.display().to_string();
 
     println!("[*] Lean 4 Grammar Fuzzer (Nautilus)");
     println!("[*] Template dir: {}", template_dir.display());
-    println!("[*] Target file:  {}", target_file.display());
+    println!("[*] Target file:  {}", TARGET_FILE);
     println!("[*] Tree depth:   {}", args.depth);
 
     // Build the Nautilus grammar context
@@ -109,8 +110,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get comparator path from environment
     let comparator_path = std::env::var("COMPARATOR_PATH")
         .expect("COMPARATOR_PATH not set in .env - please configure it");
-    let comparator_config_path = PathBuf::from(COMPARATOR_CONFIG).canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(COMPARATOR_CONFIG));
 
     // Harness: unparse → write → lake build → comparator → categorize
     let mut harness = |input: &NautilusInput| -> ExitKind {
@@ -121,16 +120,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let golden_suffix = "\n\n-- GOLDEN CHECK: If this succeeds, we found a soundness bug!\ntheorem soundness_check : False := by\n  simp_all\n  omega\n  decide\n";
         let code = format!("{}{}", prefix, golden_suffix);
 
-        if let Err(e) = fs::write(&target_file, &code) {
-            log::warn!("Failed to write Solution.lean: {e}");
+        // Create isolated temp directory for this test case
+        let temp_dir = match TempDir::new() {
+            Ok(dir) => dir,
+            Err(e) => {
+                log::warn!("Failed to create temp dir: {e}");
+                return ExitKind::Ok;
+            }
+        };
+
+        // Copy template to temp (preserves .lake/ build cache for speed)
+        let temp_template = temp_dir.path().join("template");
+        let mut copy_options = CopyOptions::new();
+        copy_options.copy_inside = true;
+
+        if let Err(e) = fs_extra::dir::copy(&template_dir, temp_dir.path(), &copy_options) {
+            log::warn!("Failed to copy template to temp: {e}");
             return ExitKind::Ok;
         }
 
-        // Step 1: Run lake build
+        // Write generated code to temp copy
+        let temp_solution = temp_template.join("Solution.lean");
+        if let Err(e) = fs::write(&temp_solution, &code) {
+            log::warn!("Failed to write Solution.lean to temp: {e}");
+            return ExitKind::Ok;
+        }
+
+        // Step 1: Run lake build in isolated temp directory
         let lake_result = Command::new("lake")
             .arg("build")
             .arg("Solution")
-            .current_dir(&template_dir_str)
+            .current_dir(&temp_template)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .output();
@@ -144,11 +164,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         // Step 2: Run comparator (via lake env for proper environment)
+        let temp_comparator_config = temp_template.join("comparator_config.json");
         let comparator_result = Command::new("lake")
             .arg("env")
             .arg(&comparator_path)
-            .arg(comparator_config_path.display().to_string())
-            .current_dir(&template_dir_str)
+            .arg(temp_comparator_config.display().to_string())
+            .current_dir(&temp_template)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .output();
@@ -160,6 +181,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 false
             }
         };
+
+        // temp_dir automatically cleaned up when dropped
 
         // Step 3: Categorize results
         let timestamp = current_nanos();
