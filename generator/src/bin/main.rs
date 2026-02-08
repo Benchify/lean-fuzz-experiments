@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 use std::fs;
+use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -195,11 +196,12 @@ fn run_lake_build(dir: &Path) -> (bool, String) {
 }
 
 fn has_parse_error(stderr: &str) -> bool {
-    // Parse errors indicate syntax invalidity. Patterns from scaffold/src/scaffold/diagnostics.py
+    // Parse error patterns from scaffold/src/scaffold/diagnostics.py (line 16-19)
+    // These indicate parser-level errors, NOT semantic/elaboration errors
     stderr.contains("expected") ||
-    stderr.contains("unexpected") ||
-    stderr.contains("unknown identifier") && stderr.contains("available?") ||
-    stderr.contains("invalid")
+    stderr.contains("unexpected token") ||
+    stderr.contains("unknown command") ||
+    stderr.contains("unterminated")
 }
 
 fn run_comparator(dir: &Path, bin: &str) -> bool {
@@ -367,7 +369,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Quick check: does the prefix alone compile?
         let (prefix_builds, prefix_stderr) = run_lake_build(&temp);
-        let prefix_syntax_valid = prefix_builds || !has_parse_error(&prefix_stderr);
+        let prefix_syntax_valid = if prefix_builds {
+            true  // If it builds, it's definitely syntactically valid
+        } else {
+            !has_parse_error(&prefix_stderr)  // Check stderr for parse errors
+        };
 
         if !prefix_builds {
             stats_ref.record(prefix_syntax_valid, false, false, false);
