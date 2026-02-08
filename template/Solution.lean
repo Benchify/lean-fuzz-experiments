@@ -1,9 +1,13 @@
-import Lean
-import Lean.Elab.Command
-universe w w
+-- Solution module for fuzzer-generated code
+-- This file is NOT modified during fuzzing (tests run in temp copies)
+--
+-- During fuzzing:
+-- 1. Fuzzer creates temp copy of template/
+-- 2. Writes generated code to temp_copy/Solution.lean
+-- 3. Runs lake build in temp copy
+-- 4. Cleans up temp directory
+--
+-- This file remains clean and is used as the base for temp copies.
 
-@[reducible] def f : Prop := ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((have hx : True := (⟨⟩ : default % show ∀ {α : Type}, String from by
-  rfl
-  assumption
-  ext b < ⟨inferInstance, inferInstance⟩)
-default.1 :: default % n.2))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+-- Default placeholder theorem
+theorem soundness_check : False := sorry
