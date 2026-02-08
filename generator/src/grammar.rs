@@ -21,15 +21,14 @@ fn rules_raw() -> Vec<(&'static str, &'static str)> {
         // 1. PROGRAM STRUCTURE
         // ================================================================
 
-        // FILE — top-level entry point
+        // FILE — top-level entry point (PREFIX ONLY - golden suffix added by harness)
         // NautilusContext::new auto-creates a "START -> {FILE}" wrapper
         // since FILE is the first rule's non-terminal.
-        // ~50% of alternatives include a golden check
-        ("FILE", "{PREAMBLE}\n\n{PROGRAM}\n\n{GOLDEN_CHECK}"),
+        // Generate declarations only - harness will append golden suffix
         ("FILE", "{PREAMBLE}\n\n{PROGRAM}"),
-        ("FILE", "{PREAMBLE}\n\n{GOLDEN_CHECK}"),
         ("FILE", "{PREAMBLE}\n\n{PROGRAM}\n\n{PROGRAM}"),
-        ("FILE", "{PREAMBLE}\n\n{PROGRAM}\n\n{PROGRAM}\n\n{GOLDEN_CHECK}"),
+        ("FILE", "{PREAMBLE}\n\n{PROGRAM}\n\n{PROGRAM}\n\n{PROGRAM}"),
+        ("FILE", "{PREAMBLE}"),
 
         // PREAMBLE — imports and universe declarations
         ("PREAMBLE", "{IMPORTS}\n{UNIVERSE_DECLS}\n{OPEN_DECLS}"),

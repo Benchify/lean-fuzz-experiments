@@ -37,7 +37,6 @@ The pipeline depends on two external Lean tools that must be cloned and built se
    COMPARATOR_PATH=<path-to>/comparator/.lake/build/bin/comparator
    ```
 
-
 ## Lean 4 Source (Local Reference)
 The Lean 4 compiler source is cloned at `lean4/` (gitignored, not a submodule). It exists solely for agentic search during development — never modify it.
 
@@ -59,3 +58,5 @@ We are specifically hunting for Semantic Divergence. In a successful exploit, th
 
 This approach bypasses the "shallow" bugs of the frontend and aims directly at the mathematical foundation of the prover, such as flaws in universe level handling, inductive type consistency, or termination checking.
 
+## Dev Guidelines
+Always open a PR using the github CLI when you're ready to push code. Don't push to main.
