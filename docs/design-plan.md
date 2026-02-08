@@ -400,6 +400,124 @@ Even when the golden suffix fails, differential testing is valuable:
 
 ---
 
+## Phase 7: Trusted FFI & External Code Boundary Fuzzing — NOT STARTED
+
+> **Motivation:** Lean's kernel and runtime delegate to unverified external code in several places — C++ implementations of `Nat` primitives (via GMP), `@[implemented_by]` overrides, `@[extern]` FFI, and `native_decide`'s compiled code path. Any semantic gap between what the kernel *believes* a term computes and what *actually executes* is a potential soundness hole. Jason Rute's [analysis](https://proofassistants.stackexchange.com/questions/5252/malicious-tampering-of-trusted-libraries) documents that bugs at these FFI trust boundaries have been historically common in Lean 4. The general principle: **anywhere verified Lean hands off to unverified code is an attack surface.**
+
+### New attack categories
+
+#### Category 8: External Code Trust Boundary Exploits
+The kernel and runtime trust several categories of external (non-verified) code. Generate prefixes that stress the boundaries where verified logic meets unverified implementation:
+
+**Known trust boundaries to target:**
+- [ ] **Kernel `Nat` C++ primitives** — `Nat.add`, `Nat.sub`, `Nat.mul`, `Nat.div`, `Nat.mod`, `Nat.ble`, `Nat.beq`, bitwise ops. These use GMP-backed bignum arithmetic that could disagree with the mathematical definitions at edge cases (historical precedent: `Nat.mod` bugs). But the general pattern is any kernel built-in where the C++ impl could diverge from the Lean spec.
+- [ ] **`native_decide` compiled code path** — Compiles Lean to native code for decidable propositions. The compilation itself could introduce bugs independent of GMP.
+- [ ] **String/ByteArray/FloatArray primitives** — Other types with C++ backing implementations.
+- [ ] **Any future kernel built-in** — The attack surface grows as Lean adds more optimized primitives.
+
+**Fuzzing strategy:** Generate computations that exercise boundary conditions of external implementations — not just GMP limb boundaries, but any case where an optimized implementation might take a different code path than the mathematical definition. Examples: very large values, zero/near-zero, negative-like patterns in unsigned arithmetic, compositions of primitives that interact unexpectedly.
+
+```lean
+-- The general pattern: force the kernel to reduce a computation
+-- where the external implementation might disagree with the spec.
+-- This isn't just about specific magic numbers — it's about
+-- finding *any* input where external code diverges from Lean's
+-- mathematical definitions.
+example : someComplexComputation arg1 arg2 = expectedResult := by native_decide
+```
+
+#### Category 9: Specification-Execution Gap Exploits
+Any mechanism that allows the *executed* behavior of a term to differ from its *specified* (type-checked) behavior is a potential soundness hole. Generate prefixes that create and exploit such gaps:
+
+- [ ] **`@[implemented_by]`** — Override a function's implementation. Even if our oracle flags these, explore whether the kernel's *own reasoning* is affected by the presence of overrides in the environment (e.g., does reduction use the override or the original?).
+- [ ] **`@[extern]`** — FFI declarations where the type signature may not match the external implementation.
+- [ ] **Compiler plugins / custom elaborators** — Code that runs at elaboration time and produces kernel terms. A plugin could emit a term that type-checks differently than what the elaborator expects.
+- [ ] **`Decidable` instance mismatches** — A `Decidable` instance whose `decide` function disagrees with the proposition it claims to decide. If `native_decide` trusts the instance, this is unsound.
+- [ ] **Caching/memoization boundaries** — Any place where the kernel caches a result and the cache could become inconsistent (e.g., `equiv_manager` in the kernel).
+
+**Key insight:** Our oracle already flags `@[implemented_by]` and `@[extern]` as escape hatches when they appear directly. But the interesting attacks are *indirect* — where the gap is introduced through a chain of abstractions, or where the kernel's own reduction machinery is affected by the mere presence of such declarations.
+
+### Differential testing across trust boundaries
+Build checker variants that use *different* implementations of the trusted external code, so that any FFI bug shows up as a disagreement:
+
+- [ ] Build `lean4checker` with external implementations disabled or replaced (e.g., pure-Lean `Nat` arithmetic instead of GMP)
+- [ ] For flagged candidates, compare results between standard and restricted checker builds
+- [ ] Flag any disagreement as a trust-boundary bug
+- [ ] This generalizes beyond GMP — any external impl can be swapped for differential testing
+
+---
+
+## Phase 8: Cross-Checker Verification Pipeline — NOT STARTED
+
+> **Motivation:** Our Phase 6 already mentions several independent checkers, but they're treated as one-off checks. A systematic multi-checker pipeline dramatically increases confidence: any candidate that passes Lean's kernel but fails *any* independent checker is flagged. Any candidate that passes *all* checkers despite claiming `False` is a cross-implementation kernel bug (extremely high value, as it would indicate a flaw in the shared mathematical foundations).
+
+### Multi-checker pipeline
+
+For every golden signal candidate and every Tier 0 prefix:
+
+| Checker | What it verifies | How to run |
+|---------|-----------------|------------|
+| **lean4checker** (standard) | Re-checks exported `.olean` against Lean kernel | `lean4checker` on exported environment |
+| **lean4checker** (GMP-free) | Same, but with pure arithmetic (Phase 7) | Custom build without GMP |
+| **lean4lean** | Pure Lean reimplementation of kernel | Import and re-check declarations |
+| **lean4export → Metamath Zero** | Export to `.mm0` format, verify in MM0 | `lean4export` + `mm0-hs verify` |
+| **safeverify** | Independent verification tool | `safeverify` on exported declarations |
+
+### Classification of multi-checker results
+
+| Lean kernel | Independent checkers | Classification |
+|-------------|---------------------|----------------|
+| Accepts `False` | All reject | **Lean kernel bug** (high value) |
+| Accepts `False` | Some reject, some accept | **Shared assumption bug** (very high value) |
+| Accepts `False` | All accept | **Foundation bug** (extraordinary value) |
+| Rejects `False` | Any disagrees on prefix validity | **Divergence bug** (interesting, not soundness) |
+
+### Implementation
+- [ ] Abstract checker interface: `run_checker(project_dir) -> CheckerResult`
+- [ ] Concrete implementations for each checker listed above
+- [ ] Pipeline orchestrator: run all checkers in parallel for flagged candidates
+- [ ] Result aggregation and disagreement detection
+- [ ] Wire into scaffold pipeline after oracle step
+- [ ] Store multi-checker results alongside diagnostic logs
+
+---
+
+## Phase 9: RL-Guided Exploration — NOT STARTED
+
+> **Motivation:** DeepSeek-Prover v2 demonstrated that an RL-trained AI system can exploit subtle Lean bugs (a front-end issue in their case, but the principle applies to kernel bugs). This validates our LLM-guided approach and suggests RL-based exploration as a high-leverage future direction.
+
+### Reward signal design
+Use the tiered corpus classification (Phase 4) as the reward function:
+
+| Outcome | Reward |
+|---------|--------|
+| Prefix doesn't compile | 0.0 |
+| Prefix compiles, golden suffix has type error | 0.3 |
+| Prefix compiles, golden suffix fails with "proof not found" | 0.7 (Tier 0) |
+| Prefix compiles, golden suffix succeeds (soundness bug!) | 1.0 |
+
+The key insight: a "proof not found" error in the golden suffix means the prefix *almost* corrupted the environment enough — the automation tactic just couldn't find the path. This is a much stronger signal than a type error, which means the prefix's declarations are fundamentally incompatible with the golden check.
+
+### Policy architecture
+- [ ] Fine-tune a small LM (e.g., CodeLlama-7B or similar) to generate prefixes
+- [ ] Training data: Tier 0/1 prefixes from Phases 1-6 as positive examples
+- [ ] Rejection sampling initially, then PPO/DPO once enough signal accumulates
+- [ ] Input: attack category + optional seed prefix; Output: complete prefix
+
+### Integration with UCB1 bandits
+- [ ] UCB1 bandits from Phase 5 select attack categories at the macro level
+- [ ] Within each category, RL policy generates specific prefixes
+- [ ] Two-level exploration: bandits explore *which* attack surfaces, RL explores *how* to attack each surface
+
+### Prerequisites and timeline
+This phase is speculative and long-term. It depends on:
+- [ ] Sufficient training data from Phases 1-6 (likely thousands of Tier 0/1 prefixes)
+- [ ] Demonstrated ceiling on LLM-guided generation without RL
+- [ ] Compute budget for RL training runs
+- Earliest feasible start: after Phases 1-5 are mature and producing corpus data
+
+---
+
 ## Domain-Specific Attack Strategies
 
 | Strategy | Target | Prefix Pattern |
@@ -414,6 +532,8 @@ Even when the golden suffix fails, differential testing is valuable:
 | Elaborator Gap | Elab -> Kernel | Macros/elaborators producing unusual kernel terms |
 | Attribute Confusion | simp/reducible/instance | Attributes that affect automation but not kernel checking |
 | Option Manipulation | `set_option` | Options that weaken checking (if any exist) |
+| External Code Trust Boundaries | Kernel C++ primitives, GMP, native code | Computations where external impls might diverge from Lean specs |
+| Specification-Execution Gaps | `@[implemented_by]`, `@[extern]`, plugins | Mechanisms creating semantic gaps between type-checked and executed behavior |
 
 ---
 
@@ -483,5 +603,8 @@ Even when the golden suffix fails, differential testing is valuable:
 | **Phase 4** | Feedback Loop + Corpus Management | **~30%** (diagnostics done, no feedback loop) |
 | **Phase 5** | Attack Planner | **NOT STARTED** |
 | **Phase 6** | Advanced Differential Testing | **~25%** (comparator in generator, not in scaffold) |
+| **Phase 7** | Trusted FFI & External Code Boundary Fuzzing | **NOT STARTED** |
+| **Phase 8** | Cross-Checker Verification Pipeline | **NOT STARTED** |
+| **Phase 9** | RL-Guided Exploration | **NOT STARTED** (speculative/long-term) |
 
 **Key architectural gap:** The generator (Rust) and scaffold (Python) pipelines are not connected. The generator still produces full files and runs its own build/comparator loop independently. The scaffold has the assembler + golden suffix pipeline but consumes `gen-sample` output which isn't prefix-only. Phase 2 is the bridge.
