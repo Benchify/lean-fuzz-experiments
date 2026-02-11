@@ -31,7 +31,7 @@ use libafl_bolts::current_nanos;
 use libafl_bolts::rands::StdRand;
 use libafl_bolts::tuples::tuple_list;
 
-use generator::{create_context, create_prefix_context, generate_one};
+use generator::{create_context, create_prefix_context, generate_one, extract_rules_used, RuleCoverage, Outcome};
 use std::path::Path;
 
 const TEMPLATE_DIR: &str = "../template";
@@ -79,7 +79,12 @@ impl VerifierStats {
         }
     }
 
-    fn print_if_due(&self) { self.print_table_internal(false); }
+    fn print_if_due(&self, coverage: Option<&RuleCoverage>) {
+        self.print_table_internal(false);
+        if let Some(cov) = coverage {
+            cov.print_report(10);
+        }
+    }
     fn print_final(&self) { self.print_table_internal(true); }
 
     fn print_table_internal(&self, force: bool) {
@@ -206,9 +211,9 @@ fn run_safeverify(dir: &Path, bin: &str) -> bool {
             .output().map_or(false, |o| o.status.success())
 }
 
-fn categorize_and_save(lake: bool, comp: bool, safe: bool, code: &str, stats: &VerifierStats) -> bool {
+fn categorize_and_save(lake: bool, comp: bool, safe: bool, code: &str, stats: &VerifierStats, coverage: Option<&RuleCoverage>) -> bool {
     stats.record(lake, comp, safe);
-    stats.print_if_due();
+    stats.print_if_due(coverage);
 
     let cat = format!("solutions/lake_{}_comp_{}_safe_{}",
         if lake {"pass"} else {"fail"},
@@ -337,25 +342,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stats = Arc::new(VerifierStats::new());
     let stats_ref = Arc::clone(&stats);
 
+    // Rule coverage tracking
+    let coverage = Arc::new(RuleCoverage::new());
+    let coverage_ref = Arc::clone(&coverage);
+
     // Harness: one temp dir per prefix, try golden suffixes only if prefix compiles
     let mut harness = |input: &NautilusInput| -> ExitKind {
         let prefix = generate_one(&ctx, input);
 
+        // Extract which grammar rules were used (for coverage tracking)
+        let rules_used = extract_rules_used(&prefix);
+
         // Create ONE temp dir for this prefix (reused across all suffixes)
         let (_td, temp) = match setup_temp_environment(&template_dir, &prefix) {
             Ok(v) => v,
-            Err(_) => return ExitKind::Ok,
+            Err(_) => {
+                // Track that these rules failed to compile
+                coverage_ref.record(&rules_used, Outcome::Failed);
+                return ExitKind::Ok;
+            }
         };
 
         // Quick check: does the prefix alone compile?
         if !run_lake_build(&temp) {
             stats_ref.record(false, false, false);
-            stats_ref.print_if_due();
+            stats_ref.print_if_due(Some(&coverage_ref));
+            // Track that these rules failed to compile
+            coverage_ref.record(&rules_used, Outcome::Failed);
             return ExitKind::Ok;
         }
 
         // Prefix compiles! Now try each golden suffix in the SAME temp dir.
         let mut best_is_crash = false;
+        let mut best_outcome = Outcome::CompiledOnly;
+
         for &(suffix_name, golden_suffix) in GOLDEN_SUFFIXES {
             let code = format!("{}{}", prefix, golden_suffix);
             // Overwrite Solution.lean with prefix+suffix
@@ -371,13 +391,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if comp { "PASS" } else { "FAIL" },
                 if safe { "PASS" } else { "FAIL" });
 
-            if categorize_and_save(true, comp, safe, &code, &stats_ref) {
+            // Determine outcome for coverage tracking
+            let outcome = match (comp, safe) {
+                (true, true) => Outcome::PassedBoth,
+                (true, false) => Outcome::PassedComparator,
+                _ => Outcome::CompiledOnly,
+            };
+
+            if outcome.priority() > best_outcome.priority() {
+                best_outcome = outcome;
+            }
+
+            if categorize_and_save(true, comp, safe, &code, &stats_ref, Some(&coverage_ref)) {
                 best_is_crash = true;
             }
         }
 
-        // Don't record prefix-only cases - only record actual test results
-        // (prefix+suffix) where we ran all three verifiers.
+        // Record rule usage with best outcome achieved
+        coverage_ref.record(&rules_used, best_outcome);
 
         if best_is_crash { ExitKind::Crash } else { ExitKind::Ok }
     };
@@ -417,6 +448,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("📄 Summary: {}", p.display());
     }
     println!("📁 Results: generator/solutions/lake_*_comp_*_safe_*/");
+
+    // Print grammar rule coverage report
+    coverage.print_report(15);
 
     fuzz_result?;
     Ok(())
