@@ -1,9 +1,10 @@
 """CLI for the Poisoned Prefix Fuzzer.
 
 Commands:
-    fuzz        — Generate prefixes and test against golden suffixes.
-    init-pool   — Create template pool without running tests.
-    test-prefix — Test a single .lean file against golden suffixes.
+    fuzz            — Generate prefixes and test against golden suffixes.
+    init-pool       — Create template pool without running tests.
+    test-prefix     — Test a single .lean file against golden suffixes.
+    refine-grammar  — Analyze successful prefixes with LLM to suggest grammar improvements.
 """
 
 import hashlib
@@ -536,6 +537,118 @@ def report(
         typer.echo(f"Summary saved to {output}")
     else:
         typer.echo("\n" + summary)
+
+
+@app.command()
+def refine_grammar(
+    successes_dir: Path = typer.Argument(
+        ..., help="Directory containing successful result_*.lean files"
+    ),
+    grammar_path: Path = typer.Option(
+        MONOREPO / "generator" / "src" / "grammar.rs",
+        help="Path to grammar.rs file",
+    ),
+    output: Path = typer.Option(
+        MONOREPO / "artifacts" / "grammar_suggestions.json",
+        "--output",
+        "-o",
+        help="Output path for suggestions JSON",
+    ),
+    limit: int = typer.Option(
+        50, help="Maximum number of successes to analyze (avoid token limits)"
+    ),
+    api_key: str | None = typer.Option(
+        None, help="Anthropic API key (or use ANTHROPIC_API_KEY env var)"
+    ),
+) -> None:
+    """Analyze successful prefixes with LLM to suggest grammar improvements.
+
+    Uses Claude Opus to analyze patterns in successful fuzzer outputs and suggest
+    grammar rule changes to improve success rate.
+
+    Example:
+        uv run scaffold refine-grammar \\
+            generator/solutions/lake_pass_comp_fail_safe_fail/ \\
+            --output grammar_suggestions.json
+    """
+    import os
+
+    from scaffold.grammar_refiner import (
+        analyze_with_llm,
+        load_grammar_rules,
+        load_successful_prefixes,
+        print_analysis_summary,
+        save_analysis,
+    )
+
+    # Validate inputs
+    if not successes_dir.exists():
+        typer.echo(f"Error: Directory not found: {successes_dir}", err=True)
+        raise typer.Exit(1)
+
+    if not grammar_path.exists():
+        typer.echo(f"Error: Grammar file not found: {grammar_path}", err=True)
+        raise typer.Exit(1)
+
+    # Check for API key
+    if not api_key:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        typer.echo(
+            "Error: ANTHROPIC_API_KEY not set. Use --api-key or set environment variable.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    typer.echo(f"Loading successful prefixes from {successes_dir}...")
+    successes = load_successful_prefixes(successes_dir, limit=limit)
+
+    if not successes:
+        typer.echo("Error: No successful prefixes found in directory.", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"✓ Loaded {len(successes)} successful prefixes")
+
+    typer.echo(f"Loading grammar from {grammar_path}...")
+    grammar = load_grammar_rules(grammar_path)
+    typer.echo(f"✓ Loaded grammar ({len(grammar)} chars)")
+
+    # Count failed executions from other directories
+    failed_count = 0
+    parent = successes_dir.parent
+    if parent.exists():
+        for fail_dir in parent.glob("lake_fail_*"):
+            failed_count += len(list(fail_dir.glob("result_*.lean")))
+
+    typer.echo(
+        f"\nAnalyzing with Claude Opus (model: claude-opus-4-6, ~{failed_count} failures)..."
+    )
+    typer.echo("This may take 30-60 seconds...")
+
+    try:
+        analysis = analyze_with_llm(
+            successes=successes,
+            grammar=grammar,
+            failed_count=failed_count,
+            api_key=api_key,
+            model="claude-opus-4-6",
+        )
+    except Exception as e:
+        typer.echo(f"Error during LLM analysis: {e}", err=True)
+        raise typer.Exit(1)
+
+    # Print summary to console
+    print_analysis_summary(analysis)
+
+    # Save to JSON
+    output.parent.mkdir(parents=True, exist_ok=True)
+    save_analysis(analysis, output)
+
+    typer.echo(f"\n✅ Analysis complete! Review suggestions in {output}")
+    typer.echo("\nNext steps:")
+    typer.echo("  1. Review the suggestions in the JSON file")
+    typer.echo("  2. Manually apply approved changes to generator/src/grammar.rs")
+    typer.echo("  3. Run fuzzer again to test improvements")
 
 
 def main() -> None:
