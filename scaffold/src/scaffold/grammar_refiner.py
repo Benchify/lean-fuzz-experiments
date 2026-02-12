@@ -230,3 +230,65 @@ def print_analysis_summary(analysis: GrammarAnalysis) -> None:
         print(f"  {i}. {change}")
 
     print("\n" + "=" * 80)
+
+
+def apply_suggestions(
+    analysis: GrammarAnalysis, grammar_path: Path, top_n: int = 3
+) -> list[str]:
+    """Apply top N suggestions to grammar file.
+
+    Args:
+        analysis: Grammar analysis with suggestions
+        grammar_path: Path to grammar.rs to modify
+        top_n: Number of top-priority suggestions to apply
+
+    Returns:
+        List of changes made (for logging)
+    """
+    if not analysis.suggested_rules:
+        return []
+
+    # Sort by priority and take top N
+    top_suggestions = sorted(
+        analysis.suggested_rules, key=lambda x: x.priority, reverse=True
+    )[:top_n]
+
+    content = grammar_path.read_text()
+    changes = []
+
+    # Find the prefix_rules_raw() function to add rules
+    marker = "fn prefix_rules_raw() -> Vec<(&'static str, &'static str)> {"
+    if marker not in content:
+        msg = "Could not find prefix_rules_raw() function in grammar.rs"
+        raise ValueError(msg)
+
+    # Find the vec![ opening
+    vec_start = content.find("vec![", content.find(marker))
+    if vec_start == -1:
+        msg = "Could not find vec![ in prefix_rules_raw()"
+        raise ValueError(msg)
+
+    # Add new rules after the vec![ line
+    insertion_point = content.find("\n", vec_start) + 1
+
+    new_rules = []
+    for suggestion in top_suggestions:
+        # Escape the expansion properly for Rust strings
+        expansion = suggestion.expansion.replace('"', '\\"')
+        rule = f'        ("{suggestion.nonterminal}", "{expansion}"),  // Auto-added: {suggestion.reason[:60]}'
+        new_rules.append(rule)
+        changes.append(f"Added {suggestion.nonterminal}: {suggestion.expansion[:50]}...")
+
+    # Insert the new rules
+    new_content = (
+        content[:insertion_point]
+        + "\n        // === AUTO-GENERATED RULES (LLM suggestions) ===\n"
+        + "\n".join(new_rules)
+        + "\n        // === END AUTO-GENERATED RULES ===\n\n"
+        + content[insertion_point:]
+    )
+
+    # Write back
+    grammar_path.write_text(new_content)
+
+    return changes

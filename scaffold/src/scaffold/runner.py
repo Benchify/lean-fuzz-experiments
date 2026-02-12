@@ -560,6 +560,9 @@ def refine_grammar(
     api_key: str | None = typer.Option(
         None, help="Anthropic API key (or use ANTHROPIC_API_KEY env var)"
     ),
+    auto_apply: int = typer.Option(
+        0, help="Auto-apply top N suggestions to grammar (0 = no auto-apply)"
+    ),
 ) -> None:
     """Analyze successful prefixes with LLM to suggest grammar improvements.
 
@@ -575,6 +578,7 @@ def refine_grammar(
 
     from scaffold.grammar_refiner import (
         analyze_with_llm,
+        apply_suggestions,
         load_grammar_rules,
         load_successful_prefixes,
         print_analysis_summary,
@@ -644,11 +648,24 @@ def refine_grammar(
     output.parent.mkdir(parents=True, exist_ok=True)
     save_analysis(analysis, output)
 
-    typer.echo(f"\n✅ Analysis complete! Review suggestions in {output}")
-    typer.echo("\nNext steps:")
-    typer.echo("  1. Review the suggestions in the JSON file")
-    typer.echo("  2. Manually apply approved changes to generator/src/grammar.rs")
-    typer.echo("  3. Run fuzzer again to test improvements")
+    # Auto-apply if requested
+    if auto_apply > 0:
+        typer.echo(f"\n🤖 Auto-applying top {auto_apply} suggestions to grammar...")
+        try:
+            changes = apply_suggestions(analysis, grammar_path, top_n=auto_apply)
+            for change in changes:
+                typer.echo(f"  ✓ {change}")
+            typer.echo(f"\n✅ Applied {len(changes)} suggestions to {grammar_path}")
+            typer.echo("⚠️  You must rebuild the fuzzer: cd generator && cargo build --release")
+        except Exception as e:
+            typer.echo(f"❌ Error applying suggestions: {e}", err=True)
+            typer.echo("   Suggestions saved to JSON for manual review.")
+    else:
+        typer.echo(f"\n✅ Analysis complete! Review suggestions in {output}")
+        typer.echo("\nNext steps:")
+        typer.echo("  1. Review the suggestions in the JSON file")
+        typer.echo("  2. Manually apply approved changes to generator/src/grammar.rs")
+        typer.echo("  3. Run fuzzer again to test improvements")
 
 
 def main() -> None:
