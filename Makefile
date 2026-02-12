@@ -3,8 +3,10 @@
 # Configuration
 JOBS ?= 1
 DEPTH ?= 15
+REFINE_INTERVAL ?= 100
+AUTO_APPLY ?= 3
 
-.PHONY: run build test clean help deps
+.PHONY: run run-continuous build test clean help deps
 
 # Lean version (must match across all tools for .olean compatibility)
 LEAN_VERSION ?= v4.27.0
@@ -26,6 +28,18 @@ run: build
 		sleep 0.2; \
 	done; \
 	wait
+
+# Run continuous agentic fuzzing with LLM-guided grammar refinement
+run-continuous: build
+	@echo "[*] Starting continuous agentic fuzzing"
+	@echo "[*] Refine interval: $(REFINE_INTERVAL) executions"
+	@echo "[*] Auto-apply: Top $(AUTO_APPLY) suggestions"
+	@echo "[*] Depth: $(DEPTH)"
+	@echo "[*] Press Ctrl+C to stop"
+	@REFINE_INTERVAL=$(REFINE_INTERVAL) \
+	 DEPTH=$(DEPTH) \
+	 AUTO_APPLY=$(AUTO_APPLY) \
+	 ./scripts/continuous_fuzz.sh
 
 # Build the fuzzer
 build:
@@ -96,18 +110,23 @@ help:
 	@echo "Lean 4 Soundness Fuzzer"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make deps        - Install all dependencies (comparator, safeverify, etc.)"
-	@echo "  make run         - Run fuzzer with $(JOBS) parallel workers"
-	@echo "  make build       - Build the fuzzer"
-	@echo "  make test        - Run tests"
-	@echo "  make clean       - Clean build artifacts"
+	@echo "  make deps           - Install all dependencies (comparator, safeverify, etc.)"
+	@echo "  make run            - Run fuzzer with $(JOBS) parallel workers"
+	@echo "  make run-continuous - Run continuous agentic fuzzing with LLM refinement"
+	@echo "  make build          - Build the fuzzer"
+	@echo "  make test           - Run tests"
+	@echo "  make clean          - Clean build artifacts"
 	@echo ""
 	@echo "Configuration:"
-	@echo "  LEAN_VERSION=v   - Lean version for all tools (default: $(LEAN_VERSION))"
-	@echo "  JOBS=N           - Number of parallel workers (default: $(JOBS))"
-	@echo "  DEPTH=N          - Tree depth for generation (default: $(DEPTH))"
+	@echo "  LEAN_VERSION=v      - Lean version for all tools (default: $(LEAN_VERSION))"
+	@echo "  JOBS=N              - Number of parallel workers (default: $(JOBS))"
+	@echo "  DEPTH=N             - Tree depth for generation (default: $(DEPTH))"
+	@echo "  REFINE_INTERVAL=N   - Executions between refinements (default: $(REFINE_INTERVAL))"
+	@echo "  AUTO_APPLY=N        - Auto-apply top N suggestions (default: $(AUTO_APPLY))"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make deps                   # One-time setup"
-	@echo "  make run                    # Run with defaults"
-	@echo "  make run JOBS=8             # 8 parallel workers"
+	@echo "  make deps                                    # One-time setup"
+	@echo "  make run                                     # Run with defaults"
+	@echo "  make run JOBS=8                              # 8 parallel workers"
+	@echo "  export ANTHROPIC_API_KEY=sk-ant-..."
+	@echo "  make run-continuous REFINE_INTERVAL=100     # Continuous refinement"
